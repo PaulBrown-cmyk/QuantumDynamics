@@ -1,0 +1,84 @@
+!=============================== INPUT.nml ===================================
+! Example INPUT.nml (NAMELIST) for two-state proton transfer dynamics.
+! Units follow your code conventions (inputs are interpreted consistently by params.f08).
+!
+! New in this update:
+!   - Stochastic potential modulation (bath_pot_*): a random process R_t that modulates
+!     the diabatic wells (reactant/product) in one of 3 modes.
+!
+&QLE
+  ! Grid / time
+  nx         = 4096,
+  xmin       = -40.0,
+  xmax       =  40.0,
+  dt         = 0.01,
+  nsteps     = 200000,
+  save_every = 25,
+  ntraj      = 1,
+  seed0      = 2468,
+
+  ! Thermostat / friction (momentum-space Langevin/GLE)
+  beta       = 5.0,
+  gamma      = 0.5,
+
+  ! Noise kernel for momentum bath (optional)
+  use_colored = .true.,
+  kernel      = 'lorentz',
+  fwhm        = 0.15,
+
+  ! Potential model
+  pot_model   = 'harmonic',
+  w0          = 0.02,
+
+  ! Two-parabola + coupling parameters (used when pot_model selects the two-surface form)
+  k1       = 0.00911,
+  k2       = 0.00911,
+  x1       = -20.0,
+  x2       =  20.0,
+  v1_shift =  0.0,
+  v2_shift =  0.0,
+  v12      = 0.25,
+  sigma    = 1.2,
+
+  ! Initial wavepacket
+  x0      = -35.0,
+  p0      =  1.5,
+  sigma0  =  1.0,
+
+  ! Coupling and IO
+  want_coupling   = .true.,
+  use_exponential = .false.,
+  out_prefix      = 'hat_splitop',
+  hdf5            = .true.,
+
+  ! -------------------------------------------------------------------------
+  ! Stochastic potential modulation: bath acts directly on the diabatic wells
+  !
+  ! bath_pot_mode:
+  !   0 = off
+  !   1 = coordinate shift:      V_j = k_j/2 * (x - x_j - R_t)^2
+  !   2 = curvature modulation:  V_j = (k_j + R_t)/2 * (x - x_j)^2
+  !   3 = enthalpy modulation:   V_j = k_j/2 * (x - x_j)^2 + R_t
+  !
+  ! bath_pot_sigma:
+  !   Std dev of R_t (units depend on mode):
+  !     mode 1 -> length, mode 2 -> spring-constant, mode 3 -> energy
+  !
+  ! bath_pot_colored + bath_pot_fwhm:
+  !   If colored, R_t is OU with correlation time tau_c = 2 / bath_pot_fwhm
+  !
+  ! bath_pot_reactant / bath_pot_product:
+  !   Independent on/off switches for applying modulation to each diabatic surface.
+  !
+  ! bath_pot_coupled:
+  !   If .true., the same R_t drives both surfaces (correlated bath).
+  !   If .false., independent R_t^R and R_t^P are used.
+  !
+  bath_pot_mode     = 1,
+  bath_pot_sigma    = 0.75,
+  bath_pot_colored  = .false.,
+  bath_pot_fwhm     = 0.25,
+  bath_pot_reactant = .false.,
+  bath_pot_product  = .true.,
+  bath_pot_coupled  = .true.,
+/
