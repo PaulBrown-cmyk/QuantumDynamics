@@ -8,10 +8,9 @@
 !!   - fftw_plan_dft_1d / fftw_execute_dft / fftw_destroy_plan
 !!   - fftw_init_threads / fftw_plan_with_nthreads / fftw_cleanup_threads
 !!
-!! In addition, this file provides two *Fortran* convenience wrappers with the
-!! classic external symbol names expected by legacy call sites:
-!!   - CALL fft_init_threads()
-!!   - CALL fft_cleanup_threads()
+!! In addition, this module provides two Fortran convenience wrappers:
+!!   - CALL init_fft_threads()
+!!   - CALL cleanup_fft_threads()
 !!
 !! These wrappers set the FFTW planner thread count to the OpenMP max threads
 !! (when built with -fopenmp), otherwise to 1.
@@ -30,7 +29,7 @@ MODULE fftwrap
 
   ! Public C-bindings used by the code.
   PUBLIC :: fftw_plan_dft_1d, fftw_execute_dft, fftw_destroy_plan
-  PUBLIC :: fftw_init_threads, fftw_plan_with_nthreads, fftw_cleanup_threads
+  PUBLIC :: init_fft_threads, cleanup_fft_threads
 
   INTERFACE
     INTEGER(C_INT) FUNCTION fftw_init_threads() BIND(C, name="fftw_init_threads")
@@ -68,18 +67,12 @@ MODULE fftwrap
     END SUBROUTINE fftw_destroy_plan
   END INTERFACE
 
-END MODULE fftwrap
+CONTAINS
 
-!===============================================================================
-! Legacy external wrappers expected by some call sites (e.g., main.f08).
-!===============================================================================
-
-SUBROUTINE fft_init_threads()
-  USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT
-  USE fftwrap, ONLY: fftw_init_threads, fftw_plan_with_nthreads
+SUBROUTINE init_fft_threads()
 #ifdef _OPENMP
   USE omp_lib, ONLY: omp_get_max_threads
-#ENDIF
+#endif
   IMPLICIT NONE
 
   INTEGER(C_INT) :: ok, nthreads
@@ -94,16 +87,17 @@ SUBROUTINE fft_init_threads()
 
 #ifdef _OPENMP
   nthreads = INT(omp_get_max_threads(), C_INT)
-#ELSE
+#else
   nthreads = 1_C_INT
-#ENDIF
+#endif
 
   IF (nthreads < 1_C_INT) nthreads = 1_C_INT
   CALL fftw_plan_with_nthreads(nthreads)
-END SUBROUTINE fft_init_threads
+END SUBROUTINE init_fft_threads
 
-SUBROUTINE fft_cleanup_threads()
-  USE fftwrap, ONLY: fftw_cleanup_threads
+SUBROUTINE cleanup_fft_threads()
   IMPLICIT NONE
   CALL fftw_cleanup_threads()
-END SUBROUTINE fft_cleanup_threads
+END SUBROUTINE cleanup_fft_threads
+
+END MODULE fftwrap

@@ -1,0 +1,7 @@
+.DS_Store
+build/
+qle_1d
+*.h5
+*.dat
+__pycache__/
+*.pyc

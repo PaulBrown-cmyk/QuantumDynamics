@@ -2,6 +2,7 @@
 MODULE propagator
   USE kinds
   USE params
+  USE langevin, ONLY: LangevinState, next_kick
   USE grid
   USE potentials, ONLY: v_two_surface, potentials_bath_next
   USE omp_lib
@@ -14,7 +15,7 @@ MODULE propagator
      TYPE(RealGrid) :: g
      COMPLEX(dp), ALLOCATABLE :: psi1(:), psi2(:)   ! two-surface wavefunction
      COMPLEX(dp), ALLOCATABLE :: buf1(:), buf2(:)
-     TYPE(C_PTR), ALLOCATABLE :: p_f(:)             ! FFT plans (1: forward, 2: backward)
+     TYPE(C_PTR), ALLOCATABLE :: p_f(:) ! plans: psi1 forward/backward, then psi2 forward/backward
   END TYPE SOProp
 
 CONTAINS
@@ -22,7 +23,7 @@ CONTAINS
   SUBROUTINE init_prop(prop, g)
     TYPE(SOProp),  INTENT(INOUT):: prop
     TYPE(RealGrid),INTENT(IN)   :: g
-    INTEGER :: nx
+    INTEGER :: nx, i
 
     prop%g = g
     nx = g%nx
@@ -33,16 +34,24 @@ CONTAINS
     prop%buf1 = (0.0_dp, 0.0_dp)
     prop%buf2 = (0.0_dp, 0.0_dp)
 
-    ALLOCATE(prop%p_f(2))
-    prop%p_f(1) = fftw_plan_dft_1d(nx, prop%psi1, prop%buf1, FFTW_FORWARD,  FFTW_MEASURE)
+    ALLOCATE(prop%p_f(4))
+    ! Dedicated plans preserve FFTW alignment/SIMD guarantees for each allocation.
+    prop%p_f(1) = fftw_plan_dft_1d(nx, prop%psi1, prop%buf1, FFTW_FORWARD, FFTW_MEASURE)
     prop%p_f(2) = fftw_plan_dft_1d(nx, prop%buf1, prop%psi1, FFTW_BACKWARD, FFTW_MEASURE)
+    prop%p_f(3) = fftw_plan_dft_1d(nx, prop%psi2, prop%buf2, FFTW_FORWARD, FFTW_MEASURE)
+    prop%p_f(4) = fftw_plan_dft_1d(nx, prop%buf2, prop%psi2, FFTW_BACKWARD, FFTW_MEASURE)
+    DO i = 1, SIZE(prop%p_f)
+      IF (.NOT. c_associated(prop%p_f(i))) ERROR STOP 'FFTW plan creation failed'
+    END DO
   END SUBROUTINE init_prop
 
   SUBROUTINE destroy_prop(prop)
     TYPE(SOProp), INTENT(INOUT):: prop
+    INTEGER :: i
     IF (ALLOCATED(prop%p_f)) THEN
-      IF (c_associated(prop%p_f(1))) CALL fftw_destroy_plan(prop%p_f(1))
-      IF (c_associated(prop%p_f(2))) CALL fftw_destroy_plan(prop%p_f(2))
+      DO i = 1, SIZE(prop%p_f)
+        IF (c_associated(prop%p_f(i))) CALL fftw_destroy_plan(prop%p_f(i))
+      END DO
       DEALLOCATE(prop%p_f)
     END IF
     IF (ALLOCATED(prop%psi1)) DEALLOCATE(prop%psi1)
@@ -62,13 +71,13 @@ CONTAINS
     x0 = ctrl%x0
     p0 = ctrl%p0
 
-    !$omp parallel do default(shared) private(i, amp)
+!$omp parallel do default(shared) private(i, amp)
     DO i = 1, nx
       amp = EXP(-0.5_dp*((prop%g%x(i)-x0)**2)/s2)
       prop%psi1(i) = CMPLX(amp*COS(p0*prop%g%x(i)), amp*SIN(p0*prop%g%x(i)), dp)
       prop%psi2(i) = (0.0_dp, 0.0_dp)
     END DO
-    !$omp end parallel do
+!$omp end parallel do
 
     CALL normalize_two(prop%psi1, prop%psi2, prop%g%dx)
   END SUBROUTINE set_gaussian_packet
@@ -84,12 +93,46 @@ CONTAINS
     END IF
   END SUBROUTINE normalize_two
 
-  SUBROUTINE step_split_na(ctrl, prop, dt, gamma, xi)
+  FUNCTION mean_momentum(prop) RESULT(pbar)
+    TYPE(SOProp), INTENT(INOUT) :: prop
+    REAL(dp) :: pbar, weight
+    CALL fftw_execute_dft(prop%p_f(1), prop%psi1, prop%buf1)
+    CALL fftw_execute_dft(prop%p_f(3), prop%psi2, prop%buf2)
+    weight = SUM(ABS(prop%buf1)**2 + ABS(prop%buf2)**2)
+    IF (weight <= 0.0_dp) ERROR STOP "Zero wavepacket norm"
+    pbar = SUM(prop%g%k*(ABS(prop%buf1)**2 + ABS(prop%buf2)**2))/weight
+  END FUNCTION mean_momentum
+
+  SUBROUTINE bath_kick(ctrl, prop, state, dt)
+    TYPE(SimCtrl), INTENT(IN) :: ctrl
+    TYPE(SOProp), INTENT(INOUT) :: prop
+    TYPE(LangevinState), INTENT(INOUT) :: state
+    REAL(dp), INTENT(IN) :: dt
+    REAL(dp) :: xi
+    IF (.NOT. state%enabled) RETURN
+    CALL next_kick(state, ctrl, dt, xi, mean_momentum(prop))
+    ! Shared nuclear momentum translation, hbar=1; preserves both populations.
+    prop%psi1 = prop%psi1*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
+    prop%psi2 = prop%psi2*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
+  END SUBROUTINE bath_kick
+
+  SUBROUTINE step_langevin(ctrl, prop, state, dt)
+    TYPE(SimCtrl), INTENT(IN) :: ctrl
+    TYPE(SOProp), INTENT(INOUT) :: prop
+    TYPE(LangevinState), INTENT(INOUT) :: state
+    REAL(dp), INTENT(IN) :: dt
+    ! Symmetric bath/ Hamiltonian /bath composition.
+    CALL bath_kick(ctrl, prop, state, 0.5_dp*dt)
+    CALL step_split_na(ctrl, prop, dt, 0.0_dp)
+    CALL bath_kick(ctrl, prop, state, 0.5_dp*dt)
+  END SUBROUTINE step_langevin
+
+  SUBROUTINE step_split_na(ctrl, prop, dt, xi)
     ! Nonadiabatic split step:
-    !   exp(-i V dt/2) -> FFT -> exp(-i T dt)*exp(-gamma dt) -> iFFT -> exp(+i xi x) -> exp(-i V dt/2)
+    !   exp(-i V dt/2) -> FFT -> exp(-i T dt) -> iFFT -> exp(+i xi x) -> exp(-i V dt/2)
     TYPE(SimCtrl), INTENT(IN)    :: ctrl
     TYPE(SOProp),  INTENT(INOUT) :: prop
-    REAL(dp),      INTENT(IN)    :: dt, gamma, xi
+    REAL(dp),      INTENT(IN)    :: dt, xi
 
     INTEGER :: i, nx
     REAL(dp) :: v11, v22, v12, x
@@ -103,68 +146,67 @@ CONTAINS
     CALL potentials_bath_next(ctrl)
 
     ! --- V half-step (local 2x2 at each x) with Gaussian coupling ---
-    !$omp parallel do default(shared) private(i, x, v11, v22, v12, u11, u12, u21, u22, a0, b0)
+!$omp parallel do default(shared) private(i, x, v11, v22, v12, u11, u12, u21, u22, a0, b0)
     DO i = 1, nx
       x = prop%g%x(i)
       CALL v_two_surface(ctrl, x, v11, v22, v12)
       CALL unitary_exp_2x2(CMPLX(v11, 0.0_dp, dp), CMPLX(v12, 0.0_dp, dp), &
-                           CMPLX(v12, 0.0_dp, dp), CMPLX(v22, 0.0_dp, dp), 0.5_dp*dt, &
+                           CMPLX(v22, 0.0_dp, dp), 0.5_dp*dt, &
                            u11, u12, u21, u22)
       a0 = prop%psi1(i); b0 = prop%psi2(i)
       prop%psi1(i) = u11*a0 + u12*b0
       prop%psi2(i) = u21*a0 + u22*b0
     END DO
-    !$omp end parallel do
+!$omp end parallel do
 
     ! --- FFT to k-space ---
     CALL fftw_execute_dft(prop%p_f(1), prop%psi1, prop%buf1)
-    CALL fftw_execute_dft(prop%p_f(1), prop%psi2, prop%buf2)
+    CALL fftw_execute_dft(prop%p_f(3), prop%psi2, prop%buf2)
 
-    ! --- Kinetic step with damping ---
-    !$omp parallel do default(shared) private(i, k2, phase)
+    ! --- Unitary kinetic step ---
+!$omp parallel do default(shared) private(i, k2, phase)
     DO i = 1, nx
-      k2 = (prop%g%k(i)**2)/(2.0_dp*me)
+      k2 = (prop%g%k(i)**2)/(2.0_dp*ctrl%mass)
       phase = -dt*k2
-      prop%buf1(i) = prop%buf1(i) * EXP(CMPLX(0.0_dp, phase, dp)) * EXP(-gamma*dt)
-      prop%buf2(i) = prop%buf2(i) * EXP(CMPLX(0.0_dp, phase, dp)) * EXP(-gamma*dt)
+      prop%buf1(i) = prop%buf1(i) * EXP(CMPLX(0.0_dp, phase, dp))
+      prop%buf2(i) = prop%buf2(i) * EXP(CMPLX(0.0_dp, phase, dp))
     END DO
-    !$omp end parallel do
+!$omp end parallel do
 
     ! --- inverse FFT back to real-space ---
     CALL fftw_execute_dft(prop%p_f(2), prop%buf1, prop%psi1)
-    CALL fftw_execute_dft(prop%p_f(2), prop%buf2, prop%psi2)
+    CALL fftw_execute_dft(prop%p_f(4), prop%buf2, prop%psi2)
     prop%psi1 = prop%psi1/REAL(nx, dp)
     prop%psi2 = prop%psi2/REAL(nx, dp)
 
     ! Random kick applied as a real-space phase: exp(i xi x)
-    !$omp parallel do default(shared) private(i)
+!$omp parallel do default(shared) private(i)
     DO i = 1, nx
       prop%psi1(i) = prop%psi1(i) * EXP(CMPLX(0.0_dp, xi*prop%g%x(i), dp))
       prop%psi2(i) = prop%psi2(i) * EXP(CMPLX(0.0_dp, xi*prop%g%x(i), dp))
     END DO
-    !$omp end parallel do
+!$omp end parallel do
 
     ! --- V half-step again ---
-    !$omp parallel do default(shared) private(i, x, v11, v22, v12, u11, u12, u21, u22, a0, b0)
+!$omp parallel do default(shared) private(i, x, v11, v22, v12, u11, u12, u21, u22, a0, b0)
     DO i = 1, nx
       x = prop%g%x(i)
       CALL v_two_surface(ctrl, x, v11, v22, v12)
       CALL unitary_exp_2x2(CMPLX(v11, 0.0_dp, dp), CMPLX(v12, 0.0_dp, dp), &
-                           CMPLX(v12, 0.0_dp, dp), CMPLX(v22, 0.0_dp, dp), 0.5_dp*dt, &
+                           CMPLX(v22, 0.0_dp, dp), 0.5_dp*dt, &
                            u11, u12, u21, u22)
       a0 = prop%psi1(i); b0 = prop%psi2(i)
       prop%psi1(i) = u11*a0 + u12*b0
       prop%psi2(i) = u21*a0 + u22*b0
     END DO
-    !$omp end parallel do
+!$omp end parallel do
 
-    CALL normalize_two(prop%psi1, prop%psi2, prop%g%dx)
   END SUBROUTINE step_split_na
 
-  SUBROUTINE unitary_exp_2x2(a, b, C, d, tau, u11, u12, u21, u22)
+  SUBROUTINE unitary_exp_2x2(a, b, d, tau, u11, u12, u21, u22)
     ! Robust SU(2)-style exponential for a 2x2 Hermitian matrix:
     !   H = [[a, b],[c, d]] with d,a real and c=conjg(b) (in practice).
-    COMPLEX(dp), INTENT(IN)  :: a, b, C, d
+    COMPLEX(dp), INTENT(IN)  :: a, b, d
     REAL(dp),    INTENT(IN)  :: tau
     COMPLEX(dp), INTENT(OUT) :: u11, u12, u21, u22
 

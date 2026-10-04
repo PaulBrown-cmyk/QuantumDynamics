@@ -20,7 +20,7 @@ PROGRAM qle_1d
   TYPE(LangevinState) :: L
 
   INTEGER :: tstep, isave, my_first, my_last, my_count, itraj
-  REAL(dp):: t0, t1, t, xi
+  REAL(dp):: t0, t1, t
   INTEGER :: nth
   CHARACTER(256) :: traj_prefix
 
@@ -35,7 +35,7 @@ PROGRAM qle_1d
   ! Grid & FFT
   CALL build_grid(g, ctrl%nx, ctrl%xmin, ctrl%xmax)
   nth = MAX(1, omp_get_max_threads())
-  CALL fft_init_threads(nth)
+  CALL init_fft_threads()
 
   IF (rank == 0) THEN
     WRITE(*,*) 'Welcome to the Quantum Dynamics world of Chemistry!'
@@ -56,6 +56,8 @@ PROGRAM qle_1d
 
   t0 = walltime()
 
+  IF (my_count > 0) CALL init_prop(prop, g)
+
   DO itraj = my_first, my_last
     ! Make a per-trajectory control copy so outputs don't collide
     ctrlT = ctrl
@@ -64,7 +66,6 @@ PROGRAM qle_1d
 
     CALL seed_stream(ctrlT%seed0 + 100000*rank + itraj)
 
-    CALL init_prop(prop, g)
     CALL set_gaussian_packet(prop, ctrlT)
     CALL init_langevin(L, ctrlT, ctrlT%dt)
     CALL potentials_bath_init(ctrlT, ctrlT%dt)
@@ -73,8 +74,7 @@ PROGRAM qle_1d
     isave = 0
 
     DO tstep = 1, ctrlT%nsteps
-      CALL next_kick(L, ctrlT, ctrlT%dt, xi)
-      CALL step_split_na(ctrlT, prop, ctrlT%dt, ctrlT%gamma, xi)
+      CALL step_langevin(ctrlT, prop, L, ctrlT%dt)
       t = t + ctrlT%dt
       IF (MOD(tstep, ctrlT%save_every) == 0) THEN
         isave = isave + 1
@@ -82,12 +82,13 @@ PROGRAM qle_1d
       END IF
     END DO
 
-    CALL destroy_prop(prop)
   END DO
+
+  IF (my_count > 0) CALL destroy_prop(prop)
 
   t1 = walltime()
   IF (rank == 0) WRITE(*,'(a, f10.3)') 'Wall time (s): ', REAL(t1 - t0, dp)
 
-  CALL fft_cleanup_threads()
+  CALL cleanup_fft_threads()
   CALL mpi_finish()
 END PROGRAM qle_1d

@@ -1,10 +1,27 @@
 # QuantumDynamics
-Codebase for the simulation of quantum dynamics within the harmonic oscillator approximation. 
-Two diabatic potentials are dynamically coupled are set the reatant and product potential. 
-The wavepacket propagation is handled with the Split-operator. Both reactant and product 
-states can be perturbed in three ways: 1) force modulation, 2) enthalpic modulation, and 3) equilibrium 
-shifts. Each perturbative effect is driven with random oscillations and modulate the 
-barrier height between both states. Both states also contain Quantum Langevin equations (QGLE)
-that handle include disspiation in both states. 
 
-NOTE: Units should be Angstrom and wavenumbers, which needs to be fixed.
+One-dimensional quantum dynamics for H-atom transfer between two coupled
+diabatic potential wells. Wavepackets propagate with a split-operator method.
+Reactant and product wells support stochastic coordinate-shift, curvature, and
+enthalpy modulation with independent or correlated noise. A Markovian or
+Lorentz-colored Langevin/GLE bath thermostats the shared nuclear wavepacket
+centroid using classical fluctuation-dissipation statistics.
+
+Input from `INPUT.nml` uses chemistry-facing units: lengths in angstrom, times
+in femtoseconds, energies/couplings in cm^-1, rates in fs^-1, temperature in
+kelvin, mass in u/amu, and wave numbers in 1/angstrom. Parser validates these
+values and converts them to atomic units immediately. ASCII and HDF5 writers
+convert coordinates, time, wavefunctions/densities, expectation values, and
+potentials back to physical units.
+
+Quartic inputs `c4_1` and `c4_2` use cm^-1/angstrom^4. Energy shifts remain
+independent cm^-1 values; they are no longer overloaded as quartic coefficients.
+`k1` and `k2` define well stiffness; obsolete no-op `w0` input was removed.
+
+`temperature_k` and `mass_amu` are physical inputs. `beta` and atomic-unit mass
+are derived internally and must not appear in `INPUT.nml`. This replaces old
+internal-unit `beta` input and fixed electron-mass propagation.
+
+Build with `make`; disable HDF5 support with `make USE_HDF5=0`. At runtime,
+`hdf5=.false.` selects ASCII output even in HDF5-enabled builds. Run unit,
+FFTW, Langevin, and output smoke tests with `make test`.

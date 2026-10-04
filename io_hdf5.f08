@@ -2,13 +2,14 @@
 MODULE io_hdf5
   USE kinds
   USE params
+  USE constants, ONLY: ANGSTROM_TO_AU, AU_TO_ANGSTROM, AU_TO_CMINV, AU_TO_FS
   USE grid
   USE potentials, ONLY: v_two_surface, pes_on_grid
   USE iso_fortran_env, ONLY: output_unit
   USE omp_lib
 #ifdef USE_HDF5
   USE hdf5
-#ENDIF
+#endif
   IMPLICIT NONE
 CONTAINS
 
@@ -59,10 +60,14 @@ CONTAINS
 
     WRITE(fname, '(a, ".rank",i0, ".h5")') TRIM(ctrl%out_prefix), rank
 #ifdef USE_HDF5
-    CALL h5_write(ctrl, fname, g, t, psi1, psi2, step)
-#ELSE
+    IF (ctrl%hdf5) THEN
+      CALL h5_write(ctrl, fname, g, t, psi1, psi2, step)
+    ELSE
+      CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank)
+    END IF
+#else
     CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank)
-#ENDIF
+#endif
   END SUBROUTINE write_snapshot
 
   SUBROUTINE ascii_write(ctrl, g, t, psi1, psi2, step, rank)
@@ -78,7 +83,7 @@ CONTAINS
 
     WRITE(fname, '(a, ".rank",i0, ".s",i6.6, ".dat")') TRIM(ctrl%out_prefix), rank, step
     OPEN(newunit=iu, FILE=fname, ACTION='write', STATUS='replace')
-    WRITE(iu, '(a, 1x, f12.6)') '# t =', t
+    WRITE(iu, '(a, 1x, f12.6)') '# t(fs) =', t * AU_TO_FS
 
     ! Append observables time series (ASCII/CSV-friendly): step, t, <x>_1, <x>_2
     CALL x_expect_1d(g%x, g%dx, psi1, pop1, xavg1)
@@ -86,12 +91,12 @@ CONTAINS
     WRITE(fobs, '(a, ".rank",i0, ".obs.dat")') TRIM(ctrl%out_prefix), rank
     IF (step == 1) THEN
       OPEN(newunit=iu_obs, FILE=fobs, ACTION='write', STATUS='replace')
-      WRITE(iu_obs,'(a)') '# step   t        xavg1       xavg2       pop1        pop2'
+      WRITE(iu_obs,'(a)') '# step   t(fs)    xavg1(Ang)   xavg2(Ang)   pop1        pop2'
     ELSE
       OPEN(newunit=iu_obs, FILE=fobs, ACTION='write', POSITION='append', STATUS='unknown')
     END IF
     WRITE(iu_obs,'(i10,1x,es20.10,1x,es20.10,1x,es20.10,1x,es20.10,1x,es20.10)') &
-         step, t, xavg1, xavg2, pop1, pop2
+         step, t * AU_TO_FS, xavg1 * AU_TO_ANGSTROM, xavg2 * AU_TO_ANGSTROM, pop1, pop2
     CLOSE(iu_obs)
 
 
@@ -100,7 +105,10 @@ CONTAINS
       CALL ascii_write_pes(ctrl, g, rank)
     END IF
     DO i = 1, g%nx
-      WRITE(iu, '(f12.6, 1x, es20.10, 1x, es20.10)') g%x(i), REAL(psi1(i)*CONJG(psi1(i))), REAL(psi2(i)*CONJG(psi2(i)))
+      WRITE(iu, '(f12.6, 1x, es20.10, 1x, es20.10)') &
+           g%x(i) * AU_TO_ANGSTROM, &
+           REAL(psi1(i)*CONJG(psi1(i))) * ANGSTROM_TO_AU, &
+           REAL(psi2(i)*CONJG(psi2(i))) * ANGSTROM_TO_AU
     END DO
     CLOSE(iu)
   END SUBROUTINE ascii_write
@@ -115,7 +123,7 @@ SUBROUTINE ascii_write_pes(ctrl, g, rank)
 
   WRITE(fname, '(a, ".rank",i0, ".pes.dat")') TRIM(ctrl%out_prefix), rank
   OPEN(newunit=iu, FILE=fname, ACTION='write', STATUS='replace')
-  WRITE(iu,'(a)') '# x  V11  V22  V12  V_lower  V_upper'
+  WRITE(iu,'(a)') '# x(Ang)  V11(cm^-1)  V22(cm^-1)  V12(cm^-1)  V_lower(cm^-1)  V_upper(cm^-1)'
   DO i = 1, g%nx
     CALL v_two_surface(ctrl, g%x(i), v11, v22, v12)
     vavg = 0.5_dp*(v11 + v22)
@@ -124,7 +132,9 @@ SUBROUTINE ascii_write_pes(ctrl, g, rank)
     v_lower = vavg - rad
     v_upper = vavg + rad
     WRITE(iu,'(f12.6, 1x, es20.10, 1x, es20.10, 1x, es20.10, 1x, es20.10, 1x, es20.10)') &
-         g%x(i), v11, v22, v12, v_lower, v_upper
+         g%x(i) * AU_TO_ANGSTROM, &
+         v11 * AU_TO_CMINV, v22 * AU_TO_CMINV, v12 * AU_TO_CMINV, &
+         v_lower * AU_TO_CMINV, v_upper * AU_TO_CMINV
   END DO
   CLOSE(iu)
 END SUBROUTINE ascii_write_pes
@@ -165,7 +175,7 @@ END SUBROUTINE ascii_write_pes
     ! If this is the first step of a run, start a fresh file to avoid
     ! collisions with previous runs that used the same filename.
     IF (step == 1) THEN
-      CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
+    CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
     ELSE
       CALL h5fopen_f(fname, H5F_ACC_RDWR_F, f, ierr)
       IF (ierr /= 0) CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
@@ -213,10 +223,10 @@ END SUBROUTINE ascii_write_pes
     vadiab(2,:) = v_upper
 
     ! ----------------------------------------------------------------------
-    CALL write_1d(gid, 'x', g%x)
-    CALL write_scalar(gid, 't', t)
-    CALL write_c1d(gid, 'psi1', psi1)
-    CALL write_c1d(gid, 'psi2', psi2)
+    CALL write_1d(gid, 'x', g%x * AU_TO_ANGSTROM)
+    CALL write_scalar(gid, 't', t * AU_TO_FS)
+    CALL write_c1d(gid, 'psi1', psi1 * SQRT(ANGSTROM_TO_AU))
+    CALL write_c1d(gid, 'psi2', psi2 * SQRT(ANGSTROM_TO_AU))
 
     ! ------------------------------------------------------------------
     ! Position expectation values for each diabatic component:
@@ -225,18 +235,18 @@ END SUBROUTINE ascii_write_pes
     ! step_*/t, step_*/xavg1, step_*/xavg2.
     CALL x_expect_1d(g%x, g%dx, psi1, pop1, xavg1)
     CALL x_expect_1d(g%x, g%dx, psi2, pop2, xavg2)
-    CALL write_scalar(gid, 'xavg1', xavg1)
-    CALL write_scalar(gid, 'xavg2', xavg2)
+    CALL write_scalar(gid, 'xavg1', xavg1 * AU_TO_ANGSTROM)
+    CALL write_scalar(gid, 'xavg2', xavg2 * AU_TO_ANGSTROM)
     CALL write_scalar(gid, 'pop1', pop1)
     CALL write_scalar(gid, 'pop2', pop2)
 
-    CALL write_1d(gid, 'V11', v11)
-    CALL write_1d(gid, 'V22', v22)
-    CALL write_1d(gid, 'V12', v12)
-    CALL write_1d(gid, 'V_lower', v_lower)
-    CALL write_1d(gid, 'V_upper', v_upper)
-    CALL write_2d(gid, 'Vdiab', vdiab)
-    CALL write_2d(gid, 'Vadiab', vadiab)
+    CALL write_1d(gid, 'V11', v11 * AU_TO_CMINV)
+    CALL write_1d(gid, 'V22', v22 * AU_TO_CMINV)
+    CALL write_1d(gid, 'V12', v12 * AU_TO_CMINV)
+    CALL write_1d(gid, 'V_lower', v_lower * AU_TO_CMINV)
+    CALL write_1d(gid, 'V_upper', v_upper * AU_TO_CMINV)
+    CALL write_2d(gid, 'Vdiab', vdiab * AU_TO_CMINV)
+    CALL write_2d(gid, 'Vadiab', vadiab * AU_TO_CMINV)
 
     DEALLOCATE(v11, v22, v12, v_lower, v_upper, vdiab, vadiab)
 
@@ -342,6 +352,6 @@ END SUBROUTINE ascii_write_pes
     END SUBROUTINE write_scalar
 
   END SUBROUTINE h5_write
-#ENDIF
+#endif
 
 END MODULE io_hdf5

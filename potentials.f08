@@ -8,15 +8,8 @@
 !   * The "anharmonic" option means: add a quartic term to either (or both)
 !     harmonic wells:
 !       Vii(x) = Vii_h(x) + c4_i (x-xi)^4
-!   * Optional diabatic coupling (Gaussian) and constant energy shifts are
-!     preserved for backward compatibility.
-!
-! Notes on parameters:
-!   - This module only uses fields already referenced elsewhere:
-!       k1,k2,x1,x2,v1_shift,v2_shift,v12,sigma,pot_model
-!   - If you later extend SimCtrl with explicit cubic coefficients, compile with
-!     -DHAVE_QUARTIC_FIELDS and provide ctrl%c4_1 and ctrl%c4_2 (preferred), or
-!     -DHAVE_CUBIC_FIELDS and provide ctrl%c3_1 and ctrl%c3_2 (interpreted as quartic).
+!   * Optional diabatic coupling (Gaussian or exponential) and constant energy
+!     shifts are controlled independently.
 !
 MODULE potentials
   USE kinds
@@ -112,7 +105,6 @@ CONTAINS
     REAL(dp) :: c4_1, c4_2
     LOGICAL  :: add_cubic1, add_cubic2
     LOGICAL  :: want_coupling
-    LOGICAL  :: want_shift1, want_shift2
     LOGICAL  :: use_exponential
     CHARACTER(LEN=:), ALLOCATABLE :: model
 
@@ -170,9 +162,7 @@ CONTAINS
     !   - Enabled if |ctrl%v12|>0 and ctrl%sigma>0, unless model contains 'nocpl'
     !   - Default shape is Gaussian; if model contains 'exp' use exponential
     !
-    ! Energy shifts:
-    !   - Applied via ctrl%v1_shift and ctrl%v2_shift, except when those fields are
-    !     being used as cubic coefficients (legacy fallback, see below).
+    ! Energy shifts are independent of explicit quartic coefficients c4_1/c4_2.
 
     add_cubic1 = .FALSE.
     add_cubic2 = .FALSE.
@@ -188,39 +178,15 @@ CONTAINS
       add_cubic2 = .TRUE.
     END IF
 
-    ! --- Anharmonicity: quartic term(s) ---------------------------------------
-    ! Preferred: explicit fields ctrl%c4_1 and ctrl%c4_2 (compile with -DHAVE_QUARTIC_FIELDS)
-    ! Backward compatible: if compiled with -DHAVE_CUBIC_FIELDS, ctrl%c3_1/ctrl%c3_2 are interpreted as quartic.
-    ! Legacy fallback (no SimCtrl extension): repurpose v1_shift/v2_shift as quartic coefficients
-    ! when add_cubic1/add_cubic2 are requested.
-    c4_1 = 0.0_dp
-    c4_2 = 0.0_dp
-
-#ifdef HAVE_QUARTIC_FIELDS
     c4_1 = ctrl%c4_1
     c4_2 = ctrl%c4_2
-    want_shift1 = .TRUE.
-    want_shift2 = .TRUE.
-#elif defined(HAVE_CUBIC_FIELDS)
-    c4_1 = ctrl%c3_1
-    c4_2 = ctrl%c3_2
-    want_shift1 = .TRUE.
-    want_shift2 = .TRUE.
-#ELSE
-    IF (add_cubic1) c4_1 = ctrl%v1_shift
-    IF (add_cubic2) c4_2 = ctrl%v2_shift
-
-    ! If we are using v*_shift as a quartic coefficient, do NOT also apply it as a shift.
-    want_shift1 = .NOT. add_cubic1
-    want_shift2 = .NOT. add_cubic2
-#ENDIF
 
     IF (add_cubic1) v11 = v11 + c4_1*dx1*dx1*dx1*dx1
     IF (add_cubic2) v22 = v22 + c4_2*dx2*dx2*dx2*dx2
 
     ! --- Constant shifts (optional) ------------------------------------------
-    IF (want_shift1) v11 = v11 + ctrl%v1_shift
-    IF (want_shift2) v22 = v22 + ctrl%v2_shift
+    v11 = v11 + ctrl%v1_shift
+    v22 = v22 + ctrl%v2_shift
 
     ! Enthalpy modulation: Vii = Vii + R_t
     IF (ctrl%bath_pot_mode == 3) THEN
@@ -229,14 +195,15 @@ CONTAINS
     END IF
 
     ! --- Diabatic coupling V12(x) (optional) ---------------------------------
-    want_coupling = .FALSE.
+    want_coupling = ctrl%want_coupling
     IF (INDEX(model,'nocpl') > 0 .OR. INDEX(model,'nocouple') > 0 .OR. INDEX(model,'decouple') > 0) THEN
       want_coupling = .FALSE.
     ELSE
-      IF (ABS(ctrl%v12) > TINY .AND. ctrl%sigma > 0.0_dp) want_coupling = .TRUE.
+      want_coupling = want_coupling .AND. ABS(ctrl%v12) > TINY .AND. ctrl%sigma > 0.0_dp
     END IF
 
-    use_exponential = (INDEX(model,'exponential') > 0 .OR. INDEX(model,'exp') > 0)
+    use_exponential = ctrl%use_exponential .OR. INDEX(model,'exponential') > 0 .OR. &
+                      INDEX(model,'exp') > 0
 
     IF (want_coupling) THEN
       ! Center coupling at the midpoint of the diabatic well minima by default.

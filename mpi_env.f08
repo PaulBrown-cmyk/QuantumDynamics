@@ -3,7 +3,7 @@
 MODULE mpi_env
   USE kinds
   USE iso_fortran_env, ONLY: error_unit
-  USE mpi, ONLY: MPI_Init, MPI_Finalize, MPI_Comm_rank, MPI_Comm_size, MPI_COMM_WORLD
+  USE mpi, ONLY: MPI_Init, MPI_Finalize, MPI_Comm_rank, MPI_Comm_size, MPI_Abort, MPI_COMM_WORLD
   IMPLICIT NONE
   INTEGER:: comm, nprocs, rank
 CONTAINS

@@ -1,8 +1,8 @@
 #=============================== Makefile ====================================
 MPIFC ?= mpifort
 
-FFTW_PREFIX := $(shell brew --prefix fftw)
-HDF5_PREFIX := $(shell brew --prefix hdf5)
+FFTW_PREFIX ?= $(shell brew --prefix fftw 2>/dev/null || echo /usr)
+HDF5_PREFIX ?= $(shell brew --prefix hdf5 2>/dev/null || echo /usr)
 
 MODDIR := build/mod
 OBJDIR := build/obj
@@ -22,7 +22,7 @@ endif
 # FFTW link
 LDLIBS += -L$(FFTW_PREFIX)/lib -lfftw3_threads -lfftw3 -lm -lpthread
 
-SRC = kinds.f08 mpi_env.f08 timers.f08 params.f08 rng.f08 grid.f08 potentials.f08 \
+SRC = kinds.f08 constants.f08 mpi_env.f08 timers.f08 params.f08 rng.f08 grid.f08 potentials.f08 \
       fftwrap.f08 langevin.f08 propagator.f08 io_hdf5.f08 main.f08
 
 OBJ = $(patsubst %.f08,$(OBJDIR)/%.o,$(SRC))
@@ -35,12 +35,21 @@ $(MODDIR) $(OBJDIR):
 
 # Compile each source to an object, producing .mod into build/mod
 $(OBJDIR)/%.o: %.f08 | $(MODDIR) $(OBJDIR)
-	$(MPIFC) $(FFLAGS) -c $< -o $@
+	$(MPIFC) $(FFLAGS) -x f95-cpp-input -c $< -o $@
 
 # Link
 qle_1d: $(OBJ)
 	$(MPIFC) $(FFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
+$(OBJDIR)/params.o: $(OBJDIR)/constants.o
+$(OBJDIR)/io_hdf5.o: $(OBJDIR)/constants.o
+
 clean:
 	rm -rf build qle_1d *.h5 *.dat
 
+# Module sources are ordered in SRC; do not race module generation.
+.NOTPARALLEL:
+.PHONY: all clean test
+test: qle_1d
+	FC=$(MPIFC) FFTW_PREFIX=$(FFTW_PREFIX) QLE_EXE=$(CURDIR)/qle_1d \
+	  HDF5_ENABLED=$(USE_HDF5) ./tests/run.sh

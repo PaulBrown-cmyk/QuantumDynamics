@@ -692,8 +692,8 @@ def plot_snapshot(d: TrajData, it: int) -> None:
         ax.plot(x[:nx], d.rho1[it, :nx], label=r"$\rho_1$")
         ax.plot(x[:nx], d.rho2[it, :nx], label=r"$\rho_2$")
 
-    ax.set_xlabel(r"$x$", size=14)
-    ax.set_ylabel(r"$|\psi(x,t)|^2$")
+    ax.set_xlabel(r"$x\;(\AA)$", size=14)
+    ax.set_ylabel(r"$\rho(x,t)\;(\AA^{-1})$")
     ax.set_ylim(0.0, float(np.max(rho)) * 1.05)
 
     # Potentials on a twin axis
@@ -714,7 +714,7 @@ def plot_snapshot(d: TrajData, it: int) -> None:
         for name, Vt in pot_lines:
             nn = min(x.size, Vt.size)
             ax2.plot(x[:nn], Vt[:nn], label=name)
-        ax2.set_ylabel("Potential energy")
+        ax2.set_ylabel(r"Potential energy $(\mathrm{cm}^{-1})$")
 
         # Scale potential axis to visible range
         Vall = np.concatenate([v[: min(x.size, v.size)] for _, v in pot_lines])
@@ -743,8 +743,8 @@ def animate(d: TrajData, every: int = 1) -> None:
         (ln_rho1,) = ax.plot([], [], label=r"$\rho_1$")
         (ln_rho2,) = ax.plot([], [], label=r"$\rho_2$")
 
-    ax.set_xlabel("x")
-    ax.set_ylabel(r"$\rho(x,t)$")
+    ax.set_xlabel(r"$x\;(\AA)$")
+    ax.set_ylabel(r"$\rho(x,t)\;(\AA^{-1})$")
     ax.set_xlim(float(np.min(x)), float(np.max(x)))
     ax.set_ylim(0.0, float(np.max(rho)) * 1.05)
 
@@ -769,7 +769,7 @@ def animate(d: TrajData, every: int = 1) -> None:
             pot_lines.append(ln)
 
     if ax2 is not None and pot_arrays:
-        ax2.set_ylabel(r"$P(x,t)$")
+        ax2.set_ylabel(r"Potential energy $(\mathrm{cm}^{-1})$")
 
         # Compute y-lims across all potentials
         pot_vals = []
@@ -918,8 +918,8 @@ def plot_reactant_product_probabilities(d: TrajData, x_split: Optional[float] = 
             xavg = np.where(pop > 0.0, num / pop, np.nan)
         ax2.plot(d.t, xavg, label=r"$\langle\hat{x}\rangle_{total}$")
 
-    ax2.set_xlabel("t", size=14)
-    ax2.set_ylabel(r"$\langle\hat{x}\rangle$", size=14)
+    ax2.set_xlabel(r"$t\;(\mathrm{fs})$", size=14)
+    ax2.set_ylabel(r"$\langle\hat{x}\rangle\;(\AA)$", size=14)
     ax2.grid(True, alpha=0.25)
     ax2.legend(loc="best")
 
@@ -1023,4 +1023,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

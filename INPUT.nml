@@ -1,6 +1,14 @@
 !=============================== INPUT.nml ===================================
 ! Example INPUT.nml (NAMELIST) for two-state proton transfer dynamics.
-! Units follow your code conventions (inputs are interpreted consistently by params.f08).
+! Chemistry-facing units:
+!   lengths      : angstrom
+!   times        : femtosecond
+!   energies     : wavenumber (cm^-1)
+!   rates        : fs^-1
+!   wave number  : 1/angstrom
+!   temperature  : kelvin
+!   mass         : unified atomic mass units (u/amu)
+! read_input() converts these immediately into atomic units for propagation.
 !
 ! New in this update:
 !   - Stochastic potential modulation (bath_pot_*): a random process R_t that modulates
@@ -9,41 +17,44 @@
 &QLE
   ! Grid / time
   nx         = 4096,
-  xmin       = -40.0,
-  xmax       =  40.0,
-  dt         = 0.01,
-  nsteps     = 200000,
+  xmin       = -4.0000,
+  xmax       =  4.0000,
+  dt         = 0.10000,
+  nsteps     = 20000,
   save_every = 25,
   ntraj      = 1,
   seed0      = 2468,
 
   ! Thermostat / friction (momentum-space Langevin/GLE)
-  beta       = 5.0,
-  gamma      = 0.5,
+  temperature_k = 300.0,
+  mass_amu      = 1.00784, ! neutral hydrogen-atom transfer mass
+  gamma      = 20.6707,
 
   ! Noise kernel for momentum bath (optional)
   use_colored = .true.,
   kernel      = 'lorentz',
-  fwhm        = 0.15,
+  fwhm        = 6.20121,
 
-  ! Potential model
+  ! Potential model. Well stiffness comes from k1/k2.
   pot_model   = 'harmonic',
-  w0          = 0.02,
 
   ! Two-parabola + coupling parameters (used when pot_model selects the two-surface form)
-  k1       = 0.00911,
-  k2       = 0.00911,
-  x1       = -20.0,
-  x2       =  20.0,
+  ! k1/k2 are force constants in cm^-1 / Å^2, converted to atomic units on read.
+  k1       = 2000.0,
+  k2       = 2000.0,
+  x1       = -2.0000,
+  x2       =  2.0000,
   v1_shift =  0.0,
   v2_shift =  0.0,
-  v12      = 0.25,
-  sigma    = 1.2,
+  c4_1     =  0.0, ! quartic coefficient in cm^-1 / Å^4
+  c4_2     =  0.0,
+  v12      = 54868.7,
+  sigma    = 0.01,
 
   ! Initial wavepacket
-  x0      = -35.0,
-  p0      =  1.5,
-  sigma0  =  1.0,
+  x0      = -2.5000,
+  p0      =  2.83459,
+  sigma0  =  0.529177,
 
   ! Coupling and IO
   want_coupling   = .true.,
@@ -75,9 +86,9 @@
   !   If .false., independent R_t^R and R_t^P are used.
   !
   bath_pot_mode     = 1,
-  bath_pot_sigma    = 0.75,
+  bath_pot_sigma    = 0.396883,
   bath_pot_colored  = .false.,
-  bath_pot_fwhm     = 0.25,
+  bath_pot_fwhm     = 10.3353,
   bath_pot_reactant = .false.,
   bath_pot_product  = .true.,
   bath_pot_coupled  = .true.,
