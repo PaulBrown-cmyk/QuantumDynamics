@@ -1,7 +1,9 @@
 # QuantumDynamics
 
-One-dimensional quantum dynamics for H-atom transfer between two coupled
-diabatic potential wells. Wavepackets propagate with a split-operator method.
+Quantum dynamics for H-atom transfer between two coupled diabatic potential
+wells. One-, two-, and three-coordinate wavepackets propagate with FFT
+split-operator methods; reduced density matrices support weak-coupling Davies,
+strong-coupling HEOM, and exact finite spin-bath dynamics.
 Reactant and product wells support stochastic coordinate-shift, curvature, and
 enthalpy modulation with independent or correlated noise. A Markovian or
 Lorentz-colored Langevin/GLE bath thermostats the nuclear wavepacket centroid
@@ -13,6 +15,20 @@ Framework equations, controls, verified capabilities, production guidance, and
 remaining limitations are collected in
 [`docs/framework_capabilities.tex`](docs/framework_capabilities.tex) and the
 compiled [`docs/QuantumDynamics_Framework_Notes.pdf`](docs/QuantumDynamics_Framework_Notes.pdf).
+
+## Illustrative results
+
+![Representative open-system dynamics from the Davies, HEOM, and exact finite spin-bath solvers](docs/figures/open_system_hierarchy.png)
+
+*Representative method-specific validation calculations: weak-coupling Davies
+dynamics with KMS detailed balance (left), strong-coupling Drude-Lorentz HEOM
+with active auxiliary-density memory (center), and exact four-spin-bath dynamics
+with trace-distance backflow (right). Temperatures and time windows differ; this
+figure demonstrates solver capabilities, not a like-for-like physical benchmark.*
+
+Additional illustrated results for multidimensional propagation, product-only
+Langevin relaxation and biexponential fitting, and controlled mechanism tests
+appear in the [framework notes](docs/QuantumDynamics_Framework_Notes.pdf).
 
 Input from `INPUT.nml` uses chemistry-facing units: lengths in angstrom, times
 in femtoseconds, energies/couplings in cm^-1, rates in fs^-1, temperature in
