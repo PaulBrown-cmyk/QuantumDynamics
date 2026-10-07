@@ -20,13 +20,22 @@ They exercise the production bath, split propagator, and writers:
 * Exact t=0 output, CLI help safety, explicit input path, dynamic ASCII PES, and
   compact static-PES HDF5 output when HDF5 and Python h5py are available.
 * Bounded biexponential recovery for a synthetic two-timescale population.
+* Bitwise-identical checkpoint/restart with colored momentum and potential baths.
+* Two-rank Parallel-HDF5 MPI-IO layout, units, finite values, and normalization.
+* Quantum-FDT KMS ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
+  positivity, and thermalization.
+* Two-coordinate split-operator norm conservation.
+* End-to-end convergence and controlled-mechanism campaigns.
 
-The implemented model is a classical-FDT centroid thermostat. It preserves each
+The primary pure-state model uses a classical-FDT centroid thermostat. It preserves each
 pure-state trajectory's norm. With both damping switches enabled, one shared kick
 acts on both amplitudes. Selective mode uses the chosen diabatic component's
 conditional centroid momentum and applies its kick only to that component. It
-does not thermalize intrinsic wavepacket momentum variance or implement
-quantum-frequency-dependent FDT or a density-matrix master equation.
+does not thermalize intrinsic wavepacket momentum variance. The separate
+`quantum_fdt_density.py` path evolves a full finite-grid reduced density matrix
+under a completely positive, weak-coupling secular Davies generator with
+frequency-resolved KMS detailed balance. Strong-coupling non-Markovian baths
+remain outside that solver's declared regime.
 
 White noise uses the exact OU centroid update. For colored noise, with
 r=y-z and omega^2=gamma/tau, a half rotation of (p,r), an exact OU step,

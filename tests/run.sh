@@ -91,9 +91,30 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
     "$hdf5_python" "$root/analyze_ensemble.py" smoke_h5.traj000001.rank0.h5 \
       --output aggregate --skip-fit --no-plot
     "$hdf5_python" "$root/tests/check_ensemble_fit.py"
+    if "$hdf5_python" -c 'import scipy' >/dev/null 2>&1; then
+      "$hdf5_python" "$root/tests/test_advanced.py"
+      "$hdf5_python" "$root/convergence_campaign.py" "$root/tests/INPUT.smoke-hdf5.nml" \
+        --executable "$QLE_EXE" --output convergence --tolerance 0.1
+      test -s convergence/REPORT.md
+      "$hdf5_python" "$root/mechanism_attribution.py" "$root/tests/INPUT.smoke-hdf5.nml" \
+        --executable "$QLE_EXE" --output mechanism
+      test -s mechanism/REPORT.md
+    else
+      echo 'SKIP advanced Python checks (scipy unavailable)'
+    fi
     test -s aggregate.csv
     test -s aggregate.md
     grep -q '^0.0,' aggregate.csv
+  )
+  mkdir checkpoint
+  (
+    cd checkpoint
+    OMPI_MCA_btl=self OMP_NUM_THREADS=1 "$QLE_EXE" "$root/tests/INPUT.checkpoint-full.nml" > full.log
+    OMPI_MCA_btl=self OMP_NUM_THREADS=1 "$QLE_EXE" "$root/tests/INPUT.checkpoint-split.nml" > split.log
+    OMPI_MCA_btl=self OMP_NUM_THREADS=1 "$QLE_EXE" "$root/tests/INPUT.checkpoint-restart.nml" > restart.log
+    "$hdf5_python" "$root/tests/check_restart.py" \
+      full.traj000001.rank0.h5 resumed.traj000001.rank0.h5 \
+      resumed.traj000001.rank0.checkpoint.h5
   )
 else
   echo 'SKIP HDF5 output check (HDF5 build or h5py unavailable)'

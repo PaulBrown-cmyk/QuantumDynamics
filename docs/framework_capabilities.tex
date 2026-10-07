@@ -2,21 +2,23 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[margin=0.85in]{geometry}
+\usepackage[margin=0.75in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,longtable,array}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{hyperref}
 \usepackage{enumitem}
 \usepackage{microtype}
+\usepackage{bbold}
 
 \hypersetup{colorlinks=true,linkcolor=MidnightBlue,urlcolor=MidnightBlue}
 \setlist{nosep,leftmargin=*}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{2em}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\statusdone}{\textcolor{ForestGreen}{Implemented}}
-\newcommand{\statusplan}{\textcolor{BurntOrange}{Planned}}
+\newcommand{\statusbound}{\textcolor{BurntOrange}{Model bound}}
 \pagestyle{plain}
 
 \title{QuantumDynamics Framework and Capability Notes}
@@ -27,28 +29,32 @@
 \maketitle
 
 \begin{abstract}
-QuantumDynamics is a one-dimensional, two-diabatic-state wavepacket framework
-for hydrogen-atom transfer between coupled potential wells. It combines
+QuantumDynamics is a family of one- and two-coordinate, two-diabatic-state
+wavepacket and reduced-density-matrix tools for hydrogen-atom transfer. It combines
 split-operator propagation, optional Markovian or exponentially correlated
 Langevin centroid damping, optional stochastic modulation of either well,
 MPI-distributed trajectories, OpenMP/FFTW acceleration, and physical-unit
-input/output. This note records current equations, controls, tested behavior,
-analysis capability, known limitations, and development status.
+input/output. It also provides quantum-detailed-balance density dynamics,
+MPI-IO single-file output, exact restart, convergence campaigns, and controlled
+mechanism attribution. This note records equations, controls, tested behavior,
+analysis capability, and method boundaries.
 \end{abstract}
 
-{\small\tableofcontents}
+\begingroup
+\footnotesize
+\setlength{\parskip}{0pt}
+\tableofcontents
+\endgroup
 \newpage
 
 \section{Scope and current status}
 
-Current code is suitable for reproducible exploratory dynamics and ensemble
-kinetics. Input validation, unit conversion, FFT ordering, random-stream
-portability, HDF5 failure handling, state-selective damping, and output safety
-have regression coverage. Both HDF5-enabled and HDF5-disabled builds are tested.
-
-Code models one nuclear coordinate and two coupled diabatic amplitudes. It is
-not a general multidimensional quantum chemistry package, a density-matrix
-solver, or a first-principles electronic-structure engine.
+Current code supports reproducible pure-state trajectories, ensemble kinetics,
+a two-coordinate wavepacket model, and a finite-grid reduced density matrix.
+Input validation, unit conversion, FFT ordering, random-stream portability,
+restart identity, serial and parallel HDF5, state-selective damping, and output
+safety have regression coverage. It remains a parameterized nuclear-dynamics
+model, not a first-principles electronic-structure engine.
 
 \section{Dynamical model}
 
@@ -60,7 +66,7 @@ Wavefunction is
 \end{equation}
 with Hamiltonian
 \begin{equation}
-  \hat H = -\frac{1}{2m}\frac{\partial^2}{\partial x^2} \mathbb{1}_{1\times1}
+  \hat H = -\frac{1}{2m}\frac{\partial^2}{\partial x^2} \mathbb{1}_{2\times2}
   + \begin{pmatrix}V_{11}(x,t)&V_{12}(x)\\V_{12}(x)&V_{22}(x,t)\end{pmatrix}.
 \end{equation}
 Base diabatic wells are
@@ -104,6 +110,28 @@ damping.
 This thermostat is a classical-FDT pure-state construction. The QGLE label does
 not imply a full quantum-frequency-dependent fluctuation--dissipation kernel.
 
+\subsection{Quantum-FDT density-matrix path}
+
+\code{quantum_fdt_density.py} builds the full finite-grid system Hamiltonian,
+diagonalizes it, and propagates the reduced density matrix with a completely
+positive secular Davies generator. For each positive Bohr frequency $\omega$,
+Drude--Ohmic emission and absorption rates are
+\begin{align}
+ \Gamma_{n\rightarrow m} &= gJ(\omega)[n_B(\omega)+1]|Q_{mn}|^2,\\
+ \Gamma_{m\rightarrow n} &= gJ(\omega)n_B(\omega)|Q_{mn}|^2,
+\end{align}
+so that
+\begin{equation}
+ \frac{\Gamma_{m\rightarrow n}}{\Gamma_{n\rightarrow m}}
+ =e^{-\beta\omega}.
+\end{equation}
+This KMS relation enforces quantum detailed balance at every resolved transition
+and makes the Gibbs density matrix stationary. Stored output includes the full
+complex density matrix, physical coordinate densities, populations, energies,
+and a KMS residual. This is the controlled weak-coupling, Markovian quantum-FDT
+limit. Strong-coupling non-Markovian quantum baths require HEOM or an equivalent
+influence-functional method and are outside this solver's declared regime.
+
 \subsection{Stochastic potential bath}
 
 Either diabatic well can receive coordinate-shift, curvature, or enthalpy
@@ -122,6 +150,15 @@ layer of width $w$, each amplitude is multiplied after a full time step by
 \end{equation}
 Absorbed norm represents outgoing flux. Norm-conservation tests apply only when
 edge absorption is disabled.
+
+\subsection{Two-coordinate propagation}
+
+\code{multidimensional_transfer.py} propagates
+$\Psi(x,y,t)=(\psi_1,\psi_2)^T$ with a two-dimensional FFT split operator.
+Coordinate $x$ is the H-transfer coordinate and $y$ is a promoting or bath mode
+with independent mass. Shifted harmonic valleys contain reaction-path coupling,
+and the diabatic coupling is Gaussian in both coordinates. The solver writes
+physical-unit two-dimensional densities and potential surfaces to HDF5.
 
 \section{Units and input boundary}
 
@@ -148,6 +185,7 @@ Wave number & angstrom$^{-1}$ & bohr$^{-1}$\\
 
 \section{Primary controls}
 
+\begingroup\setlength{\parskip}{0pt}
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.35\textwidth}p{0.57\textwidth}}
 \toprule
 \normalfont Control & Meaning\\
@@ -170,8 +208,12 @@ Wave number & angstrom$^{-1}$ & bohr$^{-1}$\\
 \code{absorber_power} & Polynomial smoothness exponent.\\
 \code{hdf5, out_prefix} & Output format and filename prefix.\\
 \code{write_initial} & Write exact $t=0$ snapshot before propagation.\\
+\code{checkpoint_every} & Atomic, schema-versioned checkpoint cadence in steps.\\
+\code{restart_from_checkpoint} & Continue from exact trajectory checkpoint.\\
+\code{parallel_hdf5} & Write trajectory/frame hyperslabs to one MPI-IO HDF5 file.\\
 \bottomrule
 \end{longtable}
+\endgroup
 
 Input may be supplied as \code{./qle_1d INPUT.nml}. Running
 \code{./qle_1d --help} cannot start a trajectory or overwrite output.
@@ -179,10 +221,18 @@ Input may be supplied as \code{./qle_1d INPUT.nml}. Running
 \section{Parallel execution and reproducibility}
 
 MPI distributes complete trajectories; OpenMP and threaded FFTW accelerate each
-trajectory. Random streams depend on trajectory number rather than MPI rank, so
-changing rank count does not change a trajectory's stochastic sequence. Output
-filenames retain rank identifiers, so filenames can change when MPI layout
-changes even when numerical streams do not.
+trajectory. Random streams depend on trajectory number rather than MPI rank.
+Default output uses independent trajectory files. With Parallel HDF5 enabled,
+ranks advance synchronized trajectory batches and write nonoverlapping
+trajectory--frame--grid hyperslabs into one \code{*.ensemble.h5} file through
+the HDF5 MPI-IO driver. A two-rank, three-trajectory regression checks layout,
+physical units, finite values, and norms.
+
+Versioned checkpoint files contain wavefunctions, intrinsic Fortran RNG state,
+Langevin auxiliary variables, stochastic-potential state, time, step, and output
+index. Each checkpoint is written to a temporary HDF5 file and installed by an
+atomic rename. Deterministic FFTW plans permit bitwise comparison between
+uninterrupted and restarted runs.
 
 \section{Output and analysis}
 
@@ -195,9 +245,18 @@ files.
 
 \code{ShowDyn.py} reads trajectory files, displays HDF5 trees, plots snapshots,
 animates densities and surfaces, and plots reactant/product probabilities.
-\code{analyze_ensemble.py} combines rank/trajectory files, checks common time
+\code{analyze_ensemble.py} combines rank/trajectory files or reads the parallel
+single-file layout, checks common time
 grids, writes mean and standard-error populations, performs bounded mono- and
 biexponential fits, and can bootstrap trajectories for empirical rate intervals.
+
+\code{convergence_campaign.py} generates and executes time-step, grid, box,
+absorber, and ensemble-size variants, then writes CSV and Markdown acceptance
+tables. \code{mechanism_attribution.py} runs coupling-off, sub-barrier H,
+sub-barrier D, and over-barrier controls. It combines classical Wigner
+above-barrier fractions, prompt transfer, isotope suppression, background,
+bounded rates, and SEM. A mechanism label is emitted only when all preregistered
+tests pass; otherwise the result is explicitly inconclusive.
 
 \section{Verification status}
 
@@ -214,6 +273,12 @@ Regression coverage includes:
   \item smooth absorber norm removal;
   \item safe command-line help and explicit input paths;
   \item exact $t=0$, ASCII, dynamic-PES, and HDF5 output;
+  \item bitwise-identical checkpoint/restart with colored baths;
+  \item two-rank single-file Parallel HDF5 MPI-IO output;
+  \item KMS rate ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
+        and positivity;
+  \item two-coordinate split-operator norm conservation;
+  \item end-to-end convergence and mechanism-control campaigns;
   \item HDF5 and non-HDF5 builds under strict compiler warnings.
 \end{itemize}
 
@@ -231,9 +296,18 @@ channels, respectively, but this assignment is not unique from one stochastic
 pure-state trajectory. Publication claims require ensemble statistics and
 mechanism-control calculations.
 
-\section{Limitations and update status}
+A follow-up five-control campaign used four trajectories per control, 1.5~ps
+duration, and two-SEM decision margins. Coupling-off background was zero and
+the over-barrier gates passed. The tunneling gates failed: sub-barrier transfer
+did not exceed estimated classical contamination by the required factor, and D
+transfer was not suppressed relative to H. Therefore this parameter set supports
+an over-barrier channel, while the slow biexponential component must remain an
+empirical timescale rather than a demonstrated tunneling rate.
 
-\begin{longtable}{p{0.34\textwidth}p{0.17\textwidth}p{0.41\textwidth}}
+\section{Completed limitations and method boundaries}
+
+\begingroup\setlength{\parskip}{0pt}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.41\textwidth}}
 \toprule
 Item & Status & Note\\
 \midrule
@@ -243,20 +317,23 @@ Periodic boundary return & \statusdone & Smooth absorbing layers available; conv
 MPI/rank aggregation & \statusdone & Ensemble tool reports means, SEM, fits, and bootstrap intervals.\\
 Repeated static HDF5 PES & \statusdone & Static PES stored once; stochastic PES remains time resolved.\\
 Single-trajectory rate uncertainty & \statusdone & Ensemble bootstrap supported when multiple trajectories exist.\\
-Checkpoint/restart & \statusplan & Needs versioned serialization of wavefunctions, RNG, Langevin memory, potential-bath state, time, and output indices.\\
-Single-file parallel HDF5 & \statusplan & Current design intentionally uses independent per-rank files.\\
-Full quantum FDT & \statusplan & Current thermostat uses classical centroid covariance.\\
-Density-matrix decoherence & \statusplan & Current evolution uses pure-state trajectories and phenomenological kicks.\\
-Multidimensional transfer & \statusplan & Current grid contains one nuclear coordinate.\\
-Automated convergence campaign & \statusplan & Users must sweep $\Delta t$, box, grid, absorber, damping, and trajectory count.\\
-Mechanism-proof rate assignment & \statusplan & Requires energy/barrier, coupling-off, isotope, and ensemble controls.\\
+Checkpoint/restart & \statusdone & Versioned HDF5 stores all dynamic and random state; atomic replacement and bitwise continuation tested.\\
+Single-file parallel HDF5 & \statusdone & Parallel-HDF5 build writes one fixed-shape MPI-IO ensemble file.\\
+Quantum FDT & \statusdone & Density solver enforces frequency-resolved KMS detailed balance and Gibbs stationarity.\\
+Density-matrix decoherence & \statusdone & Complete finite-grid reduced density matrix evolves under a CP Davies generator.\\
+Multidimensional transfer & \statusdone & Two-coordinate, two-surface FFT propagation implemented and norm tested.\\
+Automated convergence campaign & \statusdone & Time-step, grid, box, absorber, and trajectory-count variants run automatically.\\
+Controlled mechanism assignment & \statusdone & Coupling, energy, isotope, prompt-transfer, rate, and SEM gates implemented.\\
+Strong-coupling non-Markovian quantum bath & \statusbound & Davies solver is weak-coupling/Markovian; HEOM is required outside that regime.\\
+Higher than two nuclear coordinates & \statusbound & Current multidimensional reference solver contains two explicit coordinates.\\
+First-principles potentials & \statusbound & Potential parameters remain user supplied.\\
 \bottomrule
 \end{longtable}
+\endgroup
 
-Checkpoint/restart is deliberately not added as an unversioned binary dump.
-Incorrect restoration of random and memory variables would produce apparently
-valid but non-reproducible trajectories. A future implementation should use a
-versioned HDF5 checkpoint schema and exact continuation tests.
+``Definitive'' mechanism assignment means definitive only for the declared
+Hamiltonian, bath model, convergence tolerance, and controls. It is not
+model-independent experimental proof.
 
 \section{Recommended production protocol}
 
@@ -275,15 +352,24 @@ versioned HDF5 checkpoint schema and exact continuation tests.
 
 \section{Build and run summary}
 
+\begingroup
+\footnotesize
 \begin{verbatim}
 make
 make test
+make test-parallel
 ./qle_1d INPUT.nml
 python analyze_ensemble.py 'run.traj*.rank*.h5' --output ensemble --bootstrap 500
 python ShowDyn.py run.traj000001.rank0.h5 --populations --no-usetex
+python quantum_fdt_density.py --output quantum_density.h5
+python multidimensional_transfer.py --output transfer_2d.h5
+python convergence_campaign.py INPUT.nml --executable ./qle_1d
+python mechanism_attribution.py INPUT.nml --executable ./qle_1d
 \end{verbatim}
+\endgroup
 
-HDF5 may be disabled with \code{make USE_HDF5=0}. FFTW, MPI, OpenMP, and HDF5
-prefixes remain configurable through the build environment.
+{\small HDF5 may be disabled with \code{make USE_HDF5=0}. FFTW, MPI, OpenMP, and
+HDF5 prefixes remain configurable through the build environment. True single-file
+MPI-IO uses \code{USE_PARALLEL_HDF5=1} with a Parallel-HDF5 installation.}
 
 \end{document}

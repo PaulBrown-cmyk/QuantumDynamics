@@ -70,6 +70,9 @@
   out_prefix      = 'hat_splitop',
   hdf5            = .true.,
   write_initial    = .true.,
+  checkpoint_every = 0,       ! steps; 0 disables versioned restart files
+  restart_from_checkpoint = .false.,
+  parallel_hdf5    = .false., ! needs USE_PARALLEL_HDF5=1 build
 
   ! -------------------------------------------------------------------------
   ! Stochastic potential modulation: bath acts directly on the diabatic wells

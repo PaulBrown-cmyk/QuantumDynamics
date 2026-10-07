@@ -5,3 +5,9 @@ qle_1d
 *.dat
 __pycache__/
 *.pyc
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.synctex.gz
+docs/framework_capabilities.pdf

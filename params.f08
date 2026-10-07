@@ -66,6 +66,9 @@ MODULE params
      CHARACTER(128)     :: out_prefix = 'run'
      LOGICAL            :: hdf5 = .true.
      LOGICAL            :: write_initial = .true.
+     INTEGER            :: checkpoint_every = 0 ! steps; 0 disables checkpoints
+     LOGICAL            :: restart_from_checkpoint = .false.
+     LOGICAL            :: parallel_hdf5 = .false.
      LOGICAL            :: want_coupling=.false.
      LOGICAL            :: use_exponential=.false.
      LOGICAL            :: units_converted=.false.
@@ -78,7 +81,7 @@ CONTAINS
     CHARACTER(*), OPTIONAL, INTENT(IN) :: filename
   
     ! Local mirrors for NAMELIST
-    INTEGER :: nx, nsteps, save_every, ntraj, seed0, absorber_power
+    INTEGER :: nx, nsteps, save_every, ntraj, seed0, absorber_power, checkpoint_every
     REAL(dp) :: xmin, xmax, dt, temperature_k, mass_amu, gamma
     REAL(dp) :: k1, k2, x1, x2, v1_shift, v2_shift, c4_1, c4_2, v12, sigma
     REAL(dp) :: x0, p0, sigma0, fwhm, absorber_width, absorber_rate
@@ -86,6 +89,7 @@ CONTAINS
     REAL(dp) :: bath_pot_sigma, bath_pot_fwhm
     LOGICAL :: bath_pot_reactant, bath_pot_product, bath_pot_coupled, bath_pot_colored
     LOGICAL :: use_colored, hdf5, want_coupling, use_exponential, write_initial, use_absorber
+    LOGICAL :: restart_from_checkpoint, parallel_hdf5
     LOGICAL :: damp_reactant, damp_product
     CHARACTER(16)  :: pot_model
     CHARACTER(16)  :: kernel
@@ -96,6 +100,7 @@ CONTAINS
                    seed0, pot_model, k1, k2, x1, x2, v1_shift, v2_shift, c4_1, c4_2, &
                    v12, sigma, x0, p0, sigma0, use_absorber, absorber_width, absorber_rate, &
                    absorber_power, use_colored, kernel, fwhm, out_prefix, hdf5, write_initial, &
+                   checkpoint_every, restart_from_checkpoint, parallel_hdf5, &
                    bath_pot_mode, bath_pot_sigma, bath_pot_fwhm, bath_pot_reactant, bath_pot_product, &
                    bath_pot_coupled, bath_pot_colored, want_coupling, use_exponential
   
@@ -150,6 +155,9 @@ CONTAINS
     out_prefix = ctrl%out_prefix
     hdf5       = ctrl%hdf5
     write_initial = ctrl%write_initial
+    checkpoint_every = ctrl%checkpoint_every
+    restart_from_checkpoint = ctrl%restart_from_checkpoint
+    parallel_hdf5 = ctrl%parallel_hdf5
     want_coupling = ctrl%want_coupling
     use_exponential = ctrl%use_exponential
   
@@ -210,6 +218,9 @@ CONTAINS
     ctrl%out_prefix = out_prefix
     ctrl%hdf5       = hdf5
     ctrl%write_initial = write_initial
+    ctrl%checkpoint_every = checkpoint_every
+    ctrl%restart_from_checkpoint = restart_from_checkpoint
+    ctrl%parallel_hdf5 = parallel_hdf5
     ctrl%want_coupling  = want_coupling 
     ctrl%use_exponential  = use_exponential
 
@@ -228,6 +239,13 @@ CONTAINS
     IF (ctrl%nsteps < 0) ERROR STOP 'nsteps must be nonnegative'
     IF (ctrl%save_every <= 0) ERROR STOP 'save_every must be positive'
     IF (ctrl%ntraj <= 0) ERROR STOP 'ntraj must be positive'
+    IF (ctrl%checkpoint_every < 0) ERROR STOP 'checkpoint_every must be nonnegative'
+    IF (ctrl%restart_from_checkpoint .AND. ctrl%checkpoint_every <= 0) &
+      ERROR STOP 'restart_from_checkpoint requires checkpoint_every > 0'
+    IF (ctrl%parallel_hdf5 .AND. .NOT. ctrl%hdf5) &
+      ERROR STOP 'parallel_hdf5 requires hdf5=.true.'
+    IF (ctrl%parallel_hdf5 .AND. ctrl%restart_from_checkpoint) &
+      ERROR STOP 'parallel_hdf5 and per-trajectory restart are mutually exclusive modes'
     IF (ctrl%temperature_k <= 0.0_dp) ERROR STOP 'temperature_k must be positive'
     IF (ctrl%mass_amu <= 0.0_dp) ERROR STOP 'mass_amu must be positive'
     IF (ctrl%gamma < 0.0_dp) ERROR STOP 'gamma must be nonnegative'

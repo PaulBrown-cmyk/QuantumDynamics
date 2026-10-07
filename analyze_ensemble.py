@@ -34,6 +34,21 @@ def read_observables(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return time, pop1, pop2
 
 
+def read_observable_records(path: Path) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Read legacy per-step file or parallel single-file ensemble layout."""
+    with h5py.File(path, "r") as handle:
+        if all(name in handle for name in ("time_fs", "pop1", "pop2")):
+            time = np.asarray(handle["time_fs"], dtype=float)
+            pop1 = np.asarray(handle["pop1"], dtype=float)
+            pop2 = np.asarray(handle["pop2"], dtype=float)
+            if pop1.ndim == 1:
+                return [(time, pop1, pop2)]
+            if pop1.ndim == 2 and pop1.shape == pop2.shape:
+                return [(time, pop1[index], pop2[index]) for index in range(pop1.shape[0])]
+            raise ValueError(f"Unsupported ensemble observable shape in {path}: {pop1.shape}")
+    return [read_observables(path)]
+
+
 def bounded_fit(time: np.ndarray, product: np.ndarray, points: int = 140) -> dict[str, float]:
     if time.size < 5 or np.ptp(product) <= 1.0e-12:
         raise ValueError("Population series lacks enough kinetic variation")
@@ -100,11 +115,11 @@ def main() -> None:
     args = parser.parse_args()
 
     paths = expand_paths(args.paths)
-    records = [read_observables(path) for path in paths]
+    records = [record for path in paths for record in read_observable_records(path)]
     time = records[0][0]
-    for path, record in zip(paths[1:], records[1:]):
+    for record in records[1:]:
         if record[0].shape != time.shape or not np.allclose(record[0], time, rtol=0.0, atol=1.0e-10):
-            raise SystemExit(f"Time grid mismatch: {path}")
+            raise SystemExit("Time grid mismatch among trajectory records")
     pop1 = np.stack([record[1] for record in records])
     pop2 = np.stack([record[2] for record in records])
     count = pop1.shape[0]

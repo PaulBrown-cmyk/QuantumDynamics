@@ -1,0 +1,6 @@
+case,trajectories,max_abs_product_difference,final_abs_product_difference,final_sem,within_tolerance
+baseline,1,0.0,0.0,0.0,True
+dt_half,1,0.004442277317026289,0.0027235806070479984,0.0,True
+grid_double,1,4.421463195569686e-14,4.421463195569686e-14,0.0,True
+box_expand,1,3.574918139293004e-14,3.574918139293004e-14,0.0,True
+ensemble_double,2,0.0032336204683774544,0.0025040674152009834,0.0025040674152009695,True

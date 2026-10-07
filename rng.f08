@@ -35,4 +35,20 @@ CONTAINS
     z2 = r*SIN(f)
   END SUBROUTINE randn_gauss
 
+  SUBROUTINE get_rng_state(state)
+    INTEGER, ALLOCATABLE, INTENT(OUT) :: state(:)
+    INTEGER :: n
+    CALL random_seed(size=n)
+    ALLOCATE(state(n))
+    CALL random_seed(get=state)
+  END SUBROUTINE get_rng_state
+
+  SUBROUTINE set_rng_state(state)
+    INTEGER, INTENT(IN) :: state(:)
+    INTEGER :: n
+    CALL random_seed(size=n)
+    IF (SIZE(state) /= n) ERROR STOP 'checkpoint RNG state size mismatch'
+    CALL random_seed(put=state)
+  END SUBROUTINE set_rng_state
+
 END MODULE rng

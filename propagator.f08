@@ -8,7 +8,7 @@ MODULE propagator
   USE omp_lib
   USE ISO_C_BINDING, ONLY: c_ptr, c_associated
   USE fftwrap, ONLY: fftw_plan_dft_1d, fftw_execute_dft, fftw_destroy_plan, &
-                     FFTW_FORWARD, FFTW_BACKWARD, FFTW_MEASURE
+                     FFTW_FORWARD, FFTW_BACKWARD, FFTW_ESTIMATE
   IMPLICIT NONE
 
   TYPE:: SOProp
@@ -36,10 +36,11 @@ CONTAINS
 
     ALLOCATE(prop%p_f(4))
     ! Dedicated plans preserve FFTW alignment/SIMD guarantees for each allocation.
-    prop%p_f(1) = fftw_plan_dft_1d(nx, prop%psi1, prop%buf1, FFTW_FORWARD, FFTW_MEASURE)
-    prop%p_f(2) = fftw_plan_dft_1d(nx, prop%buf1, prop%psi1, FFTW_BACKWARD, FFTW_MEASURE)
-    prop%p_f(3) = fftw_plan_dft_1d(nx, prop%psi2, prop%buf2, FFTW_FORWARD, FFTW_MEASURE)
-    prop%p_f(4) = fftw_plan_dft_1d(nx, prop%buf2, prop%psi2, FFTW_BACKWARD, FFTW_MEASURE)
+    ! ESTIMATE gives deterministic plans across checkpoint/restart processes.
+    prop%p_f(1) = fftw_plan_dft_1d(nx, prop%psi1, prop%buf1, FFTW_FORWARD, FFTW_ESTIMATE)
+    prop%p_f(2) = fftw_plan_dft_1d(nx, prop%buf1, prop%psi1, FFTW_BACKWARD, FFTW_ESTIMATE)
+    prop%p_f(3) = fftw_plan_dft_1d(nx, prop%psi2, prop%buf2, FFTW_FORWARD, FFTW_ESTIMATE)
+    prop%p_f(4) = fftw_plan_dft_1d(nx, prop%buf2, prop%psi2, FFTW_BACKWARD, FFTW_ESTIMATE)
     DO i = 1, SIZE(prop%p_f)
       IF (.NOT. c_associated(prop%p_f(i))) ERROR STOP 'FFTW plan creation failed'
     END DO

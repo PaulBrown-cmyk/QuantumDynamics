@@ -11,6 +11,8 @@ PROGRAM qle_1d
   USE langevin
   USE potentials, ONLY: potentials_bath_init
   USE io_hdf5
+  USE io_parallel_hdf5
+  USE checkpoint
   USE omp_lib
   USE iso_fortran_env, ONLY: output_unit, error_unit
   IMPLICIT NONE
@@ -20,7 +22,9 @@ PROGRAM qle_1d
   TYPE(SOProp)        :: prop
   TYPE(LangevinState) :: L
 
-  INTEGER :: tstep, isave, my_first, my_last, my_count, itraj
+  INTEGER :: tstep, isave, my_first, my_last, my_count, itraj, start_step
+  INTEGER :: batch, nbatches, frame
+  LOGICAL :: active
   REAL(dp):: t0, t1, t
   INTEGER :: nth
   CHARACTER(256) :: traj_prefix
@@ -73,11 +77,49 @@ PROGRAM qle_1d
     WRITE(*,'(a, i0)')       'Trajectories total: ', ctrl%ntraj
     WRITE(*,'(2a)')           'Input: ', TRIM(input_path)
   END IF
-  WRITE(*,'(a, i0, a, i0, a, i0)') 'Rank ', rank, ' handles traj ', my_first, ' .. ', my_last
+  IF (.NOT. ctrl%parallel_hdf5) &
+    WRITE(*,'(a, i0, a, i0, a, i0)') 'Rank ', rank, ' handles traj ', my_first, ' .. ', my_last
 
   t0 = walltime()
 
-  IF (my_count > 0) CALL init_prop(prop, g)
+  IF (ctrl%parallel_hdf5 .OR. my_count > 0) CALL init_prop(prop, g)
+
+  IF (ctrl%parallel_hdf5) THEN
+    CALL parallel_h5_initialize(ctrl, g)
+    nbatches = (ctrl%ntraj + nprocs - 1)/nprocs
+    DO batch = 0, nbatches - 1
+      itraj = batch*nprocs + rank + 1
+      active = itraj <= ctrl%ntraj
+      ctrlT = ctrl
+      WRITE(traj_prefix, '(a, ".traj", i6.6)') TRIM(ctrl%out_prefix), itraj
+      ctrlT%out_prefix = TRIM(traj_prefix)
+      t = 0.0_dp
+      isave = 0
+      frame = 0
+      IF (active) THEN
+        CALL seed_stream(ctrlT%seed0 + itraj)
+        CALL set_gaussian_packet(prop, ctrlT)
+        CALL init_langevin(L, ctrlT, ctrlT%dt)
+        CALL potentials_bath_init(ctrlT, ctrlT%dt)
+      END IF
+      IF (ctrlT%write_initial) THEN
+        frame = 1
+        CALL parallel_h5_write(ctrl, ctrlT, g, prop%psi1, prop%psi2, itraj, frame, t, active)
+      END IF
+      DO tstep = 1, ctrlT%nsteps
+        IF (active) CALL step_langevin(ctrlT, prop, L, ctrlT%dt)
+        t = t + ctrlT%dt
+        IF (MOD(tstep, ctrlT%save_every) == 0) THEN
+          isave = isave + 1
+          frame = isave + MERGE(1, 0, ctrlT%write_initial)
+          CALL parallel_h5_write(ctrl, ctrlT, g, prop%psi1, prop%psi2, itraj, frame, t, active)
+        END IF
+        IF (active .AND. ctrlT%checkpoint_every > 0 .AND. &
+            MOD(tstep, ctrlT%checkpoint_every) == 0) &
+          CALL write_checkpoint(ctrlT, prop, L, rank, tstep, isave, t)
+      END DO
+    END DO
+  ELSE
 
   DO itraj = my_first, my_last
     ! Make a per-trajectory control copy so outputs don't collide
@@ -85,20 +127,25 @@ PROGRAM qle_1d
     WRITE(traj_prefix, '(a, ".traj", i6.6)') TRIM(ctrl%out_prefix), itraj
     ctrlT%out_prefix = TRIM(traj_prefix)
 
-    ! Stream depends only on trajectory index, not MPI decomposition.
-    CALL seed_stream(ctrlT%seed0 + itraj)
-
-    CALL set_gaussian_packet(prop, ctrlT)
-    CALL init_langevin(L, ctrlT, ctrlT%dt)
-    CALL potentials_bath_init(ctrlT, ctrlT%dt)
-
-    t = 0.0_dp
-    isave = 0
-    IF (ctrlT%write_initial) THEN
-      CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank, .TRUE.)
+    IF (ctrlT%restart_from_checkpoint) THEN
+      IF (.NOT. checkpoint_exists(ctrlT, rank)) ERROR STOP 'requested checkpoint does not exist'
+      CALL read_checkpoint(ctrlT, prop, L, rank, start_step, isave, t)
+      IF (start_step > ctrlT%nsteps) ERROR STOP 'checkpoint step exceeds requested nsteps'
+    ELSE
+      ! Stream depends only on trajectory index, not MPI decomposition.
+      CALL seed_stream(ctrlT%seed0 + itraj)
+      CALL set_gaussian_packet(prop, ctrlT)
+      CALL init_langevin(L, ctrlT, ctrlT%dt)
+      CALL potentials_bath_init(ctrlT, ctrlT%dt)
+      t = 0.0_dp
+      isave = 0
+      start_step = 0
+      IF (ctrlT%write_initial) THEN
+        CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank, .TRUE.)
+      END IF
     END IF
 
-    DO tstep = 1, ctrlT%nsteps
+    DO tstep = start_step + 1, ctrlT%nsteps
       CALL step_langevin(ctrlT, prop, L, ctrlT%dt)
       t = t + ctrlT%dt
       IF (MOD(tstep, ctrlT%save_every) == 0) THEN
@@ -106,11 +153,15 @@ PROGRAM qle_1d
         CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank, &
                             isave == 1 .AND. .NOT. ctrlT%write_initial)
       END IF
+      IF (ctrlT%checkpoint_every > 0 .AND. MOD(tstep, ctrlT%checkpoint_every) == 0) &
+        CALL write_checkpoint(ctrlT, prop, L, rank, tstep, isave, t)
     END DO
 
   END DO
 
-  IF (my_count > 0) CALL destroy_prop(prop)
+  END IF
+
+  IF (ctrl%parallel_hdf5 .OR. my_count > 0) CALL destroy_prop(prop)
 
   t1 = walltime()
   IF (rank == 0) WRITE(*,'(a, f10.3)') 'Wall time (s): ', REAL(t1 - t0, dp)
