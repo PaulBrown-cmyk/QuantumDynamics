@@ -5,6 +5,7 @@
 \usepackage[margin=0.75in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs,array}
+\usepackage{graphicx}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{hyperref}
 \usepackage{enumitem}
@@ -59,6 +60,16 @@ restart identity, serial and parallel HDF5, state-selective damping, and output
 safety have regression coverage. It remains a parameterized nuclear-dynamics
 model, not a first-principles electronic-structure engine.
 
+The available bath descriptions form a hierarchy rather than interchangeable
+implementations. Closed split-operator propagation isolates coherent wavepacket
+motion. Centroid Langevin dynamics adds a classical thermalization model to pure
+states. Davies dynamics gives a weak-coupling quantum Markov semigroup with exact
+detailed balance. HEOM resolves finite Gaussian bath memory nonperturbatively, while
+the finite spin bath supplies an exact non-Gaussian reference with recurrences. A
+scientific calculation should select the least elaborate level that contains the
+relevant time scales and then test its regime assumptions; agreement between two
+levels is stronger evidence than numerical convergence inside only one model.
+
 \section{Dynamical model}
 
 \subsection{Two-state Hamiltonian}
@@ -82,7 +93,23 @@ Quartic terms are enabled by anharmonic model selections. Gaussian coupling is
   V_{12}(x)=V_c\exp\left[-\frac{(x-x_c)^2}{2\sigma_c^2}\right],
 \end{equation}
 with an exponential alternative. Lower and upper adiabatic surfaces are the
-eigenvalues of the local $2\times2$ diabatic potential matrix.
+eigenvalues of the local $2\times2$ diabatic potential matrix,
+\begin{equation}
+ V_{\pm}(x)=\frac{V_{11}+V_{22}}{2}\pm
+ \sqrt{\left(\frac{V_{11}-V_{22}}{2}\right)^2+|V_{12}|^2}.
+\end{equation}
+At a diabatic crossing $V_{11}=V_{22}$, nonzero coupling opens an adiabatic gap
+$2|V_{12}|$. For real coupling, the local mixing angle may be chosen through
+$\tan 2\theta=2V_{12}/(V_{11}-V_{22})$. This makes clear why ``reactant'' and
+``product'' populations are representation-dependent observables: the code reports
+diabatic populations
+\begin{equation}
+ P_i(t)=\int |\psi_i(x,t)|^2\,dx,\qquad P_1+P_2=\lVert\Psi\rVert^2,
+\end{equation}
+whereas adiabatic populations require the coordinate-dependent rotation by
+$\theta(x)$. Diabatic representation avoids explicit derivative couplings, but a
+first-principles diabatic matrix must retain a consistent electronic phase and state
+character across geometry.
 
 \subsection{Split propagation}
 
@@ -95,6 +122,23 @@ Local potential exponentials use an analytic Hermitian $2\times2$ form.
 Kinetic propagation uses forward and inverse FFTW transforms. Dedicated plans
 are created for both diabatic components. Even and odd grid sizes have tested
 FFT frequency ordering.
+
+This symmetric, time-reversible Strang factorization has local error
+$O(\Delta t^3)$ and accumulated fixed-time error $O(\Delta t^2)$ when the
+commutators of $\hat T$ and $\hat V$ are sufficiently regular. Each substep is
+unitary, so the discrete norm is conserved to roundoff when damping and absorption
+are disabled. In Fourier space,
+\begin{equation}
+ \hat T\longrightarrow \frac{k^2}{2m},\qquad
+ k_n=\frac{2\pi n}{L},
+\end{equation}
+and kinetic propagation is diagonal. FFT representation also imposes a periodic
+box and a Nyquist cutoff. Grid-spacing convergence therefore tests unresolved high
+momenta, while box-size and absorber tests diagnose periodic-image return. The
+method follows the split spectral construction of Feit, Fleck, and Steiger
+(\href{https://doi.org/10.1016/0021-9991(82)90091-2}{JCP 47, 412 (1982)}) and the
+symmetric composition of Strang
+(\href{https://doi.org/10.1137/0705041}{SIAM J. Numer. Anal. 5, 506 (1968)}).
 
 \subsection{Momentum Langevin bath}
 
@@ -110,24 +154,79 @@ with auxiliary memory and stationary random-force variables. The controls
 receives the momentum translation. Enabling both recovers shared-centroid
 damping.
 
+For white damping, the free centroid momentum update is the exact
+Ornstein--Uhlenbeck transition
+\begin{equation}
+ \bar p_{n+1}=e^{-\gamma\Delta t}\bar p_n+
+ \sqrt{\frac{m}{\beta}\left(1-e^{-2\gamma\Delta t}\right)}\,\xi_n,
+ \qquad \xi_n\sim\mathcal N(0,1),
+\end{equation}
+which preserves the Maxwell variance $\langle\bar p^2\rangle=m/\beta$ for any
+time step. Colored damping represents
+\begin{equation}
+ \dot{\bar p}(t)=F(t)-\int_0^t\gamma(t-s)\bar p(s)\,ds+R(t),\qquad
+ \langle R(t)R(t')\rangle=\frac{m}{\beta}\gamma(|t-t'|).
+\end{equation}
+The exponential kernel admits a Markovian embedding with one memory coordinate and
+one OU random force, avoiding storage of the full momentum history. This is the
+classical generalized Langevin FDT described by Kubo
+(\href{https://doi.org/10.1088/0034-4885/29/1/306}{Rep. Prog. Phys. 29, 255
+(1966)}).
+
 This thermostat is a classical-FDT pure-state construction. The QGLE label does
 not imply a full quantum-frequency-dependent fluctuation--dissipation kernel.
+Because the kick acts on a wavepacket centroid, it constrains selected first moments
+and their thermal variance; it does not by itself generate a completely positive
+reduced-density evolution or the frequency-dependent zero-point fluctuations of a
+quantum bath. State-selective damping is therefore a controlled phenomenological
+model whose sensitivity must be checked by comparing reactant-only, product-only,
+both-state, and bath-free calculations.
 
 \subsection{Quantum-FDT density-matrix path}
 
 \code{quantum_fdt_density.py} builds the full finite-grid system Hamiltonian,
 diagonalizes it, and propagates the reduced density matrix with a completely
-positive secular Davies generator. For each positive Bohr frequency $\omega$,
-Drude--Ohmic emission and absorption rates are
+positive secular Davies generator. Quantum and classical FDT differ most clearly
+in frequency space. Up to spectral-density convention, equilibrium quantum noise
+has
+\begin{equation}
+ S_{\rm sym}(\omega)\propto J(|\omega|)
+ \coth\left(\frac{\beta|\omega|}{2}\right),\qquad
+ S(-\omega)=e^{-\beta\omega}S(\omega).
+\end{equation}
+The first relation includes zero-point fluctuations; the second is the KMS
+absorption/emission asymmetry. Classical FDT is recovered only when
+$\beta|\omega|\ll1$, where $\coth(\beta|\omega|/2)\simeq2/(\beta|\omega|)$.
+Thus temperature alone does not determine whether classical noise is adequate:
+all dynamically important Bohr frequencies must also satisfy the high-temperature
+condition. See the quantum FDT development of Kubo
+(\href{https://doi.org/10.1016/0031-8914(68)90101-8}{Physica 38, 349 (1968)}).
+
+If $H_S|n\rangle=E_n|n\rangle$, the bath
+coupling operator is resolved into Bohr-frequency components of $Q$. For each
+positive frequency $\omega=E_n-E_m$, Drude--Ohmic emission and absorption rates
+are
 \begin{align}
  \Gamma_{n\rightarrow m} &= gJ(\omega)[n_B(\omega)+1]|Q_{mn}|^2,\\
  \Gamma_{m\rightarrow n} &= gJ(\omega)n_B(\omega)|Q_{mn}|^2,
 \end{align}
-so that
+where $n_B(\omega)=(e^{\beta\omega}-1)^{-1}$ and the implemented dimensionless
+spectral shape is
+\begin{equation}
+ J(\omega)=\frac{\omega/\omega_c}{1+(\omega/\omega_c)^2}.
+\end{equation}
+Thus
 \begin{equation}
  \frac{\Gamma_{m\rightarrow n}}{\Gamma_{n\rightarrow m}}
- =e^{-\beta\omega}.
+=e^{-\beta\omega}.
 \end{equation}
+Energy populations obey the Pauli equation
+\begin{equation}
+ \dot p_n=\sum_{m\ne n}\left(\Gamma_{m\rightarrow n}p_m
+ -\Gamma_{n\rightarrow m}p_n\right),
+\end{equation}
+while nondegenerate coherences rotate at their Bohr frequencies and decay at one
+half the sum of outgoing population rates plus zero-frequency pure dephasing.
 This KMS relation enforces quantum detailed balance at every resolved transition
 and makes the Gibbs density matrix stationary. Stored output includes the full
 complex density matrix, physical coordinate densities, populations, energies,
@@ -135,6 +234,15 @@ and a KMS residual. This is the controlled weak-coupling, Markovian quantum-FDT
 limit. Strong-coupling non-Markovian quantum baths require HEOM or an equivalent
 influence-functional method and are outside this solver's declared regime. They
 are handled by the separate HEOM path below.
+
+Davies construction is controlled by weak system--bath coupling, bath correlation
+times short relative to relaxation, and secular separation of distinct Bohr
+frequencies. Secularization guarantees complete positivity but suppresses coupling
+between populations and coherences at nearly degenerate transitions. Consequently,
+trace preservation, positivity, and KMS stationarity verify internal consistency;
+they do not prove that weak-coupling or secular assumptions fit a chosen physical
+system. This limit follows Davies' Markovian weak-coupling construction
+(\href{https://doi.org/10.1007/BF01608389}{Commun. Math. Phys. 39, 91 (1974)}).
 
 \subsection{Strong-coupling non-Markovian HEOM}
 
@@ -149,7 +257,21 @@ The finite-temperature bath correlation is decomposed as
  C(t)=\sum_{k=0}^{K}c_k e^{-\nu_k t}+2\Delta_K\delta(t),
 \end{equation}
 with one Drude pole, $K$ Matsubara poles, and residual white-tail correction
-$\Delta_K$. Scaled auxiliary density operators $\tilde\rho_{\boldsymbol n}$ obey
+$\Delta_K$. In atomic units, the retained expansion uses
+\begin{align}
+ \nu_0&=\gamma,&
+ c_0&=\lambda\gamma\left[\cot\left(\frac{\beta\gamma}{2}\right)-i\right],\\
+ \nu_k&=\frac{2\pi k}{\beta},&
+ c_k&=\frac{4\lambda\gamma\nu_k}{\beta(\nu_k^2-\gamma^2)},\quad k\ge 1,
+\end{align}
+and chooses the residual term so that
+\begin{equation}
+ \sum_{k=0}^{K}\frac{\operatorname{Re}c_k}{\nu_k}+\Delta_K
+ =\frac{2\lambda}{\beta\gamma}.
+\end{equation}
+This sum rule preserves the exact integrated real bath correlation after truncating
+the Matsubara series. Scaled auxiliary density operators
+$\tilde\rho_{\boldsymbol n}$ obey
 \begin{align}
  \dot{\tilde\rho}_{\boldsymbol n}={}&-
  \left(i\mathcal L+\sum_k n_k\nu_k+\Delta_K Q^\times Q^\times\right)
@@ -161,9 +283,18 @@ $\Delta_K$. Scaled auxiliary density operators $\tilde\rho_{\boldsymbol n}$ obey
  -c_k^*\tilde\rho_{\boldsymbol n-\boldsymbol e_k}Q\right).
 \end{align}
 The root ADO is the physical reduced density matrix; higher ADOs retain bath
-memory and system--bath correlations. No Born, Markov, or secular approximation
-is used. Hierarchy depth, Matsubara count, and retained system states are explicit
-convergence axes. The declared regime assumes a harmonic Gaussian bath, linear
+memory and system--bath correlations. An occupation vector
+$\boldsymbol n=(n_0,\ldots,n_K)$ records how often each exponential bath mode enters
+the hierarchy. Truncating at $\sum_k n_k\le L$ gives
+\begin{equation}
+ N_{\rm ADO}=\binom{L+K+1}{K+1},
+\end{equation}
+before multiplying by the square of the retained system dimension. Scaling by
+powers of $|c_k|$ makes neighboring hierarchy tiers numerically comparable and
+improves conditioning. No Born, Markov, or secular approximation is used within
+the declared harmonic-bath model. Hierarchy depth, Matsubara count, and retained
+system states are explicit convergence axes. The declared regime assumes a
+harmonic Gaussian bath, linear
 coupling, and Drude spectral density. This follows
 the nonperturbative reduced-hierarchy construction of Ishizaki and Tanimura
 (\href{https://doi.org/10.1143/JPSJ.74.3131}{JPSJ 74, 3131 (2005)}) and scaled
@@ -177,6 +308,21 @@ applied to every ADO for correlated nonequilibrium initialization. At converged
 hierarchy and bath expansion, the stationary real-time hierarchy corresponds to the
 thermal hierarchy generated along imaginary time, as established by Tanimura
 (\href{https://doi.org/10.1063/1.4890441}{JCP 141, 044114 (2014)}).
+
+Factorized initialization sets all non-root ADOs to zero and therefore omits initial
+system--bath correlations. Stationary initialization instead solves
+$\mathcal L_{\rm HEOM}\boldsymbol\rho_{\rm eq}=0$ together with
+$\operatorname{Tr}\rho_{\boldsymbol 0}=1$. Applying a system operator $A$ to every
+tier,
+\begin{equation}
+ \rho_{\boldsymbol n}(0)=
+ \frac{A\rho^{\rm eq}_{\boldsymbol n}A^\dagger}
+ {\operatorname{Tr}(A\rho^{\rm eq}_{\boldsymbol 0}A^\dagger)},
+\end{equation}
+creates a correlated nonequilibrium preparation without discarding bath memory.
+Stationary residual alone is insufficient: root positivity, trace, Hermiticity, ADO
+activity, and stability against $L$, $K$, and system-basis enlargement remain
+required.
 
 A 100~fs strong-coupling validation used $\lambda=500$~cm$^{-1}$,
 $\gamma^{-1}=25$~fs, ten retained system states, two Matsubara terms, and
@@ -203,12 +349,35 @@ coupled to finite spin-$1/2$ modes,
 \end{equation}
 Thermal product-bath initialization, exact unitary evolution, and exact partial trace
 yield the reduced density matrix without Gaussian, Born, Markov, or secular
-assumptions. Output includes trace distance and information backflow. This finite
-non-Gaussian reference model follows exact spin-star treatments such as Semin,
+assumptions. Specifically,
+\begin{equation}
+ \rho(0)=\rho_S(0)\otimes\frac{e^{-\beta H_B}}{Z_B},\qquad
+ \rho_S(t)=\operatorname{Tr}_B\!\left[e^{-iHt}\rho(0)e^{iHt}\right].
+\end{equation}
+Unlike a harmonic bath, spin fluctuations are bounded and possess nonzero higher
+cumulants, so two-point Gaussian correlation data do not determine the full bath
+influence. Exact diagonalization retains those statistics and every finite-size
+recurrence.
+
+Output includes trace distance
+\begin{equation}
+ D(\rho_1,\rho_2)=\frac12\lVert\rho_1-\rho_2\rVert_1
+\end{equation}
+for reactant- and product-initialized states. Any interval with increasing $D$
+witnesses recovery of state distinguishability and hence information backflow in
+the Breuer--Laine--Piilo sense
+(\href{https://doi.org/10.1103/PhysRevLett.103.210401}{PRL 103, 210401 (2009)}).
+The reported sum of positive discrete increments is a witness for this chosen state
+pair, not the optimization over all initial pairs required by the formal BLP measure.
+This finite non-Gaussian reference model follows exact spin-star treatments such as Semin,
 Sinayskiy, and Petruccione
 (\href{https://doi.org/10.1103/PhysRevA.89.012107}{PRA 89, 012107 (2014)}).
 Hilbert-space cost is exponential, so the implementation enforces at most ten bath
 spins; it does not represent an arbitrary macroscopic non-Gaussian environment.
+Because Hilbert dimension is $2^{N_B+1}$ and dense diagonalization scales cubically
+in that dimension, this path is a benchmark for small structured baths rather than a
+continuum solver. Apparent relaxation must also be distinguished from dephasing
+followed by finite-size revival.
 
 \subsection{Stochastic potential bath}
 
@@ -217,6 +386,20 @@ modulation. Noise can be white or Ornstein--Uhlenbeck colored and can be shared
 or independent between wells. Colored and white processes begin with their
 stationary Gaussian marginal distribution. Mode-dependent input amplitudes use
 length, force-constant, or energy units as appropriate.
+
+For colored modulation, each active surface variable follows the exact discrete OU
+map
+\begin{equation}
+ R_{n+1}=aR_n+\sigma\sqrt{1-a^2}\,\xi_n,\qquad
+ a=e^{-\Delta t/\tau_c},qquad \tau_c=2/\mathrm{FWHM},
+\end{equation}
+giving $\langle R_n^2\rangle=\sigma^2$ and
+$\langle R(t)R(0)\rangle=\sigma^2e^{-|t|/\tau_c}$. Shared noise models common-mode
+environmental motion; independent noise models separate local environments. Common-
+mode enthalpy shifts largely cancel from the instantaneous diabatic energy gap,
+whereas anticorrelated or independent shifts broaden it. Coordinate-shift and
+curvature modes also change forces, so equal numerical $\sigma$ values across modes
+do not represent equal physical perturbations.
 
 \subsection{Absorbing boundaries}
 
@@ -229,6 +412,14 @@ layer of width $w$, each amplitude is multiplied after a full time step by
 Absorbed norm represents outgoing flux. Norm-conservation tests apply only when
 edge absorption is disabled.
 
+The mask is equivalent to a finite-step non-Hermitian edge potential. It prevents
+wraparound only when outgoing density enters the layer smoothly and is attenuated
+before reaching the periodic boundary. Too narrow or too strong a layer reflects
+high-wavenumber components; too weak a layer leaks them through. Production results
+must therefore be stable under independent variation of layer width, rate, power,
+and box size. Population lost to the mask cannot be interpreted as reaction yield
+unless the absorbing region has a physically defined channel meaning.
+
 \subsection{Two-coordinate propagation}
 
 \code{multidimensional_transfer.py} propagates
@@ -238,6 +429,16 @@ with independent mass. Shifted harmonic valleys contain reaction-path coupling,
 and the diabatic coupling is Gaussian in both coordinates. The solver writes
 physical-unit two-dimensional densities and potential surfaces to HDF5.
 
+For separable Cartesian-like coordinates, the kinetic operator is
+\begin{equation}
+ \hat T=-\frac{1}{2m_x}\frac{\partial^2}{\partial x^2}
+        -\frac{1}{2m_y}\frac{\partial^2}{\partial y^2},
+\end{equation}
+so the multidimensional FFT keeps the kinetic exponential diagonal. A promoting
+mode can alter valley geometry, crossing accessibility, and effective coupling even
+when it is not itself a dissipative bath. Thus a change relative to one-dimensional
+dynamics may reflect coherent mode coupling rather than decoherence.
+
 \subsection{Three-coordinate propagation and external PES data}
 
 \code{multidimensional_transfer_3d.py} propagates
@@ -246,6 +447,13 @@ H transfer; $y$ and $z$ are independent promoting modes with separate masses and
 reaction-path couplings. The analytic model or an external Hermitian diabatic PES
 may supply $V_{11}$, $V_{22}$, and complex $V_{12}$.
 
+The three-coordinate kinetic operator adds
+$-(2m_z)^{-1}\partial_z^2$. Computational storage and FFT work grow with
+$2N_xN_yN_z$, illustrating the exponential grid-growth problem for further direct
+coordinates. Three dimensions therefore provide an explicit coupled-mode reference,
+not a scalable replacement for reduced-dimensional models, tensor networks, or
+multiconfiguration methods.
+
 \code{potential_data.py} defines the external HDF5 schema, rejects missing or
 incorrect units, validates finite monotone axes and array shapes, performs trilinear
 interpolation, and converts angstrom/cm$^{-1}$ data to atomic units once. Thus
@@ -253,10 +461,29 @@ first-principles PES data can enter dynamics without manual unit handling. Elect
 structure generation remains the responsibility of an external code; no dynamics
 package can infer a first-principles PES from absent electronic-structure data.
 
+Adiabatic energies alone do not uniquely determine a diabatic potential matrix:
+electronic phases, state tracking, derivative couplings, and the chosen diabatization
+fix the off-diagonal element and its sign or complex phase. Input surfaces must share
+one smooth diabatic gauge across the full grid. Interpolation is numerical, not a
+repair for discontinuous state labels or insufficient electronic-structure sampling.
+These caveats follow the nonadiabatic-coupling analysis of Baer
+(\href{https://doi.org/10.1016/S0370-1573(01)00052-7}{Phys. Rep. 358, 75 (2002)})
+and modern first-principles diabatization discussion by Guan \emph{et al.}
+(\href{https://doi.org/10.1039/D1CP03008F}{PCCP 23, 24962 (2021)}).
+
 \section{Units and input boundary}
 
 Namelist input uses chemistry-facing units and converts once to atomic units.
 Output writers convert back to physical units.
+
+Atomic units set $\hbar=e=m_e=4\pi\epsilon_0=1$, removing conversion factors from
+propagators and bath equations. Conversion occurs once at the input boundary and
+once at output. This avoids mixing a chemistry-scale time step with an atomic-unit
+Hamiltonian, a failure that can remain numerically stable while being physically
+wrong. Density conversion includes the Jacobian: if
+$x_{\text{bohr}}=c x_{\text{\AA}}$, then
+$\rho_{\text{\AA}^{-1}}=c\rho_{\text{bohr}^{-1}}$, preserving
+$\int\rho(x)\,dx$.
 
 \begin{center}
 \begin{tabular}{lll}
@@ -327,6 +554,13 @@ index. Each checkpoint is written to a temporary HDF5 file and installed by an
 atomic rename. Deterministic FFTW plans permit bitwise comparison between
 uninterrupted and restarted runs.
 
+Trajectory-number-based random streams make stochastic results invariant to MPI
+partitioning, while deterministic FFT planning stabilizes restart comparisons.
+Bitwise restart identity is stronger than conservation alone: it verifies that hidden
+Markov state---RNG position, OU variables, memory friction, output index, and both
+wavefunctions---is restored. It does not imply bitwise portability across compilers,
+FFTW builds, processor instruction sets, or floating-point contraction choices.
+
 \section{Output and analysis}
 
 HDF5 stores physical coordinates, times, wavefunctions, populations, position
@@ -336,12 +570,31 @@ fail loudly rather than silently leaving incomplete files. ASCII mode writes
 snapshot densities, observable time series, and static or frame-resolved PES
 files.
 
+For pure states, stored coordinate densities are $|\psi_i(x,t)|^2$ and integrate to
+diabatic populations. For density-matrix solvers they are diagonal coordinate-basis
+elements, $\rho_i(x,x;t)$, and contain incoherent mixtures as well as coherent
+wavepackets. Population traces alone discard spatial phase, intersurface coherence,
+and energy redistribution; mechanism analysis should therefore retain density,
+coherence, energy, and flux diagnostics when available.
+
 \code{ShowDyn.py} reads trajectory files, displays HDF5 trees, plots snapshots,
 animates densities and surfaces, and plots reactant/product probabilities.
 \code{analyze_ensemble.py} combines rank/trajectory files or reads the parallel
 single-file layout, checks common time
 grids, writes mean and standard-error populations, performs bounded mono- and
 biexponential fits, and can bootstrap trajectories for empirical rate intervals.
+
+The bounded biexponential model used after detected onset $t_0$ is
+\begin{equation}
+ P_2(t)=P_2(t_0)+A_s\left[1-e^{-k_s(t-t_0)}\right]
+                 +A_f\left[1-e^{-k_f(t-t_0)}\right],
+ \quad 0\le A_s,A_f,\quad A_s+A_f\le1-P_2(t_0).
+\end{equation}
+Bounds prevent negative channel weights and populations above unity. AIC compares
+mono- and biexponential descriptive models, while trajectory bootstrap probes
+sampling uncertainty. Neither procedure identifies a microscopic channel: different
+coherent, dissipative, or heterogeneous processes can generate nearly identical
+population curves over a finite window.
 
 \code{convergence_campaign.py} generates and executes time-step, grid, box,
 absorber, and ensemble-size variants, then writes CSV and Markdown acceptance
@@ -351,9 +604,99 @@ above-barrier fractions, prompt transfer, isotope suppression, background,
 bounded rates, and SEM. A mechanism label is emitted only when all preregistered
 tests pass; otherwise the result is explicitly inconclusive.
 
+For the initial minimum-uncertainty Gaussian used here, the classical-contamination
+estimate samples
+\begin{equation}
+ W(x,p)=\frac{1}{\pi}\exp\left[-\frac{(x-x_0)^2}{\sigma_0^2}
+ -\sigma_0^2(p-p_0)^2\right]
+\end{equation}
+and counts samples satisfying $V_-(x)+p^2/(2m)\ge V_b$. This does not turn a Wigner
+distribution into a classical ensemble; it provides a conservative diagnostic of how
+much initial phase-space weight is already energetically above the selected adiabatic
+barrier. Coupling-off control tests electronic-surface leakage, H/D comparison tests
+mass sensitivity, and prompt high-energy transfer calibrates an over-barrier response.
+No single diagnostic is unique, which is why attribution requires their conjunction.
+
 \code{heom_convergence.py} runs hierarchy-depth, Matsubara-pole, and retained
 system-basis variants. It gates population changes together with trace,
 Hermiticity, and positivity errors.
+
+Convergence has distinct numerical and statistical axes. Time step, grid spacing,
+box size, basis size, hierarchy depth, and pole count control deterministic bias.
+Trajectory count controls Monte Carlo uncertainty, which decreases only as
+$N_{\rm traj}^{-1/2}$ for independent finite-variance samples. Passing one axis at a
+time around an unconverged baseline can hide compensating errors; production work
+should repeat coupled refinements and quote tolerances on observables used for the
+final claim.
+
+\section{Illustrative results}
+
+The following plots are generated from executable examples and validation campaigns
+in this codebase. They demonstrate the range of observables and models available;
+they are not universal predictions for hydrogen transfer. Every population, rate,
+and mechanistic conclusion remains conditional on the stated Hamiltonian, bath,
+initial state, and convergence window.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/open_system_hierarchy.png}
+  \caption{Representative open-system calculations across the implemented model
+  hierarchy. (a) The weak-coupling secular Davies solver produces gradual product
+  transfer while satisfying the KMS stationarity test to numerical precision.
+  (b) A strong-coupling Drude--Lorentz HEOM calculation shows the product population
+  together with the norm carried by auxiliary density operators; their growth is a
+  direct diagnostic that bath memory is active rather than merely parameterized.
+  (c) Exact evolution with four thermal bath spins gives oscillatory transfer and a
+  nonmonotonic trace distance. Local increases in trace distance witness information
+  backflow for the selected state pair, while the finite bath also produces coherent
+  recurrences. Temperatures and time windows differ because these are method-specific
+  validation cases, not a like-for-like physical benchmark.}
+  \label{fig:open-system-hierarchy}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/multidimensional_transfer.png}
+  \caption{Multidimensional transfer capability. (a) Lower adiabatic surface of the
+  two-coordinate model; white contours show the final total nuclear density and
+  resolve localization in the reactant basin. (b) A fixed-$z$ slice through the
+  three-coordinate lower surface demonstrates the full 3D potential representation.
+  (c) Directly integrated diabatic product populations from the norm-tested 2D and 3D
+  split-operator propagators. The small values are displayed without renormalization;
+  the examples validate propagation and observables rather than claim a converged
+  chemical yield.}
+  \label{fig:multidimensional-transfer}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.96\textwidth]{figures/product_damped_biexponential.png}
+  \caption{Illustrative 1.5~ps trajectory with Langevin damping restricted to the
+  product diabatic state. The panels show diabatic populations, spatial product
+  probability, bounded mono- and biexponential fits after detected onset, and the
+  biexponential residual. The separated fitted time scales show why the framework is
+  useful for kinetic hypothesis generation. Because this is one stochastic trajectory,
+  the fitted components are descriptive and cannot by themselves establish distinct
+  over-barrier and tunneling mechanisms.}
+  \label{fig:product-damped-fit}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.94\textwidth]{figures/mechanism_controls.png}
+  \caption{Automated five-control mechanism-attribution campaign, using four
+  trajectories per control. (a) Initial classically allowed Wigner fraction, prompt
+  product population, and final product population with two-SEM error bars. Turning
+  off diabatic coupling eliminates transfer, while the deliberately over-barrier case
+  gives a strong positive response. The sub-barrier isotope controls do not pass the
+  preregistered tunneling gates for this parameter set. (b) Bounded slow and fast fit
+  rates on a logarithmic scale; no rate is reported for coupling-off because transfer
+  is identically zero. The result illustrates an important utility of the code: it can
+  reject an attractive mechanistic interpretation instead of inferring mechanism from
+  a biexponential curve alone.}
+  \label{fig:mechanism-controls}
+\end{figure}
+\clearpage
 
 \section{Verification status}
 
@@ -407,6 +750,13 @@ did not exceed estimated classical contamination by the required factor, and D
 transfer was not suppressed relative to H. Therefore this parameter set supports
 an over-barrier channel, while the slow biexponential component must remain an
 empirical timescale rather than a demonstrated tunneling rate.
+
+Rate separation is likewise not mechanism separation. When $k_f$ and $k_s$ approach
+one another, or when one amplitude is small relative to ensemble noise, biexponential
+parameters become strongly correlated and poorly identifiable. Stable mechanistic
+interpretation requires persistence under fit-window changes, bootstrap resampling,
+longer propagation, convergence refinement, and the independent barrier/coupling/
+isotope controls above.
 
 \section{Completed limitations and method boundaries}
 
