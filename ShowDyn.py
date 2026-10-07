@@ -31,6 +31,13 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
+def _trapezoid(y: np.ndarray, x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """NumPy-version-compatible trapezoidal integration."""
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(y, x, axis=axis)
+    return np.trapz(y, x, axis=axis)
+
+
 # -----------------------------
 # Matplotlib / LaTeX text setup
 # -----------------------------
@@ -691,7 +698,284 @@ def _pot_at_step(p: Optional[np.ndarray], it: int) -> Optional[np.ndarray]:
     return None
 
 
-def plot_snapshot(d: TrajData, it: int) -> None:
+def _potential_choices(d: TrajData):
+    """Return nonduplicated potential curves for plotting."""
+    specific = [
+        (r"$V_{11}$", d.V11),
+        (r"$V_{22}$", d.V22),
+        (r"$V_{lower}$", d.V_lower),
+        (r"$V_{upper}$", d.V_upper),
+    ]
+    if any(values is not None for _, values in specific):
+        return specific
+    return [(r"$V$", d.V)]
+
+
+def compute_wigner(
+    x: np.ndarray,
+    psi: np.ndarray,
+    max_points: Optional[int] = 256,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    r"""Compute pure-state Wigner function on a uniform one-dimensional grid.
+
+    Convention uses wave number ``k = p / hbar``:
+
+      W(x,k) = (1/pi) integral dy psi*(x+y) psi(x-y) exp(2 i k y).
+
+    Input ``x`` is in angstrom and ``psi`` in angstrom**(-1/2), so returned
+    ``k`` is in angstrom**(-1) and W is dimensionless.  Integrating W over k
+    recovers ``abs(psi)**2``.  Large grids are uniformly resampled to
+    ``max_points`` for practical animation cost while preserving state norm.
+    """
+    x = np.asarray(x, dtype=float).reshape(-1)
+    psi = np.asarray(psi, dtype=complex).reshape(-1)
+    if x.size != psi.size:
+        raise ValueError("x and psi must have the same length")
+    if x.size < 4:
+        raise ValueError("Wigner transform requires at least four grid points")
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(psi)):
+        raise ValueError("x and psi must contain only finite values")
+    delta = np.diff(x)
+    if np.any(delta <= 0.0):
+        raise ValueError("x grid must be strictly increasing")
+    dx = float(np.mean(delta))
+    if not np.allclose(delta, dx, rtol=1.0e-8, atol=1.0e-12 * max(1.0, abs(dx))):
+        raise ValueError("Wigner transform requires a uniform x grid")
+
+    if max_points is not None:
+        if max_points < 4:
+            raise ValueError("max_points must be at least four")
+        if x.size > max_points:
+            old_norm = float(_trapezoid(np.abs(psi) ** 2, x))
+            x_new = np.linspace(float(x[0]), float(x[-1]), int(max_points))
+            psi_new = np.interp(x_new, x, psi.real) + 1j * np.interp(x_new, x, psi.imag)
+            new_norm = float(_trapezoid(np.abs(psi_new) ** 2, x_new))
+            if old_norm > 0.0 and new_norm > 0.0:
+                psi_new *= np.sqrt(old_norm / new_norm)
+            x, psi = x_new, psi_new
+            dx = float(x[1] - x[0])
+
+    nx = x.size
+    wigner = np.empty((nx, nx), dtype=float)
+    correlation = np.zeros(nx, dtype=complex)
+    for ix in range(nx):
+        correlation.fill(0.0)
+        max_lag = min(ix, nx - 1 - ix)
+        lags = np.arange(-max_lag, max_lag + 1, dtype=int)
+        correlation[lags % nx] = np.conj(psi[ix + lags]) * psi[ix - lags]
+        # IFFT has the positive Fourier sign required by the convention above.
+        spectrum = np.fft.ifft(correlation) * nx
+        wigner[ix, :] = (dx / np.pi) * np.real(np.fft.fftshift(spectrum))
+
+    k = np.pi * np.fft.fftshift(np.fft.fftfreq(nx, d=dx))
+    return x, k, wigner
+
+
+def compute_wigner_frame(
+    d: TrajData,
+    it: int,
+    state: str = "total",
+    max_points: Optional[int] = 256,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute total or state-resolved Wigner function for one trajectory frame."""
+    it = int(np.clip(it, 0, d.t.size - 1))
+    state = state.lower()
+    if state not in ("total", "state1", "state2"):
+        raise ValueError("state must be total, state1, or state2")
+
+    if d.psi is not None:
+        if state != "total":
+            raise ValueError("state-resolved Wigner output requires psi1 and psi2")
+        return compute_wigner(d.x, d.psi[it], max_points=max_points)
+
+    if d.psi1 is None or d.psi2 is None:
+        raise ValueError("complex wavefunctions are required for a Wigner transform")
+    components = {
+        "state1": (d.psi1[it],),
+        "state2": (d.psi2[it],),
+        # Trace over diabatic electronic state.  Cross-state coherences are not
+        # part of the scalar nuclear phase-space probability.
+        "total": (d.psi1[it], d.psi2[it]),
+    }[state]
+    xw = kw = total = None
+    for component in components:
+        x_part, k_part, w_part = compute_wigner(d.x, component, max_points=max_points)
+        if total is None:
+            xw, kw, total = x_part, k_part, w_part
+        else:
+            total += w_part
+    assert xw is not None and kw is not None and total is not None
+    return xw, kw, total
+
+
+def _wigner_momentum_mask(k: np.ndarray, pmax: Optional[float]) -> np.ndarray:
+    if pmax is None:
+        return np.ones(k.size, dtype=bool)
+    if pmax <= 0.0:
+        raise ValueError("pmax must be positive")
+    mask = np.abs(k) <= pmax
+    if np.count_nonzero(mask) < 2:
+        raise ValueError("pmax leaves fewer than two momentum points")
+    return mask
+
+
+def _selected_population_bound(d: TrajData, state: str) -> float:
+    if state == "state1" and d.rho1 is not None:
+        rho = d.rho1
+    elif state == "state2" and d.rho2 is not None:
+        rho = d.rho2
+    else:
+        rho = d.rho
+    return max(float(np.max(_trapezoid(rho, d.x, axis=1))), np.finfo(float).eps)
+
+
+def _draw_density_and_pes(ax, d: TrajData, it: int):
+    """Draw density and potential curves; return mutable line artists."""
+    x, rho = _x_rho_view(d)
+    density_lines = []
+    (line_total,) = ax.plot(x, rho[it], color="black", lw=1.8, label=r"$\rho$")
+    density_lines.append((line_total, rho))
+    if d.rho1 is not None:
+        (line_1,) = ax.plot(x, d.rho1[it], lw=1.2, label=r"$\rho_1$")
+        density_lines.append((line_1, d.rho1))
+    if d.rho2 is not None:
+        (line_2,) = ax.plot(x, d.rho2[it], lw=1.2, label=r"$\rho_2$")
+        density_lines.append((line_2, d.rho2))
+    ax.set(xlabel=r"$x\;(\AA)$", ylabel=r"$\rho(x,t)\;(\AA^{-1})$")
+    ax.set_xlim(float(x[0]), float(x[-1]))
+    ax.set_ylim(0.0, max(float(np.max(rho)) * 1.05, np.finfo(float).eps))
+
+    potential_lines = []
+    ax_pes = None
+    for name, values in _potential_choices(d):
+        value = _pot_at_step(values, it)
+        if value is not None:
+            if ax_pes is None:
+                ax_pes = ax.twinx()
+            value = np.ravel(value)
+            n = min(x.size, value.size)
+            (line,) = ax_pes.plot(x[:n], value[:n], lw=1.0, alpha=0.75, label=name)
+            potential_lines.append((line, values))
+    if ax_pes is not None:
+        all_values = []
+        for _, values in potential_lines:
+            if values is not None:
+                all_values.append(np.asarray(values).reshape(-1))
+        finite = np.concatenate(all_values)
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            ax_pes.set_ylim(float(np.min(finite)), float(np.max(finite)))
+        ax_pes.set_ylabel(r"potential energy $(\mathrm{cm}^{-1})$")
+        handles1, labels1 = ax.get_legend_handles_labels()
+        handles2, labels2 = ax_pes.get_legend_handles_labels()
+        ax.legend(handles1 + handles2, labels1 + labels2, loc="best", ncol=2)
+    else:
+        ax.legend(loc="best")
+    return density_lines, potential_lines
+
+
+def plot_phase_space_snapshot(
+    d: TrajData,
+    it: int,
+    state: str = "total",
+    max_points: Optional[int] = 256,
+    pmax: Optional[float] = None,
+    save: Optional[str] = None,
+) -> None:
+    """Plot density/PES and signed Wigner phase space for one frame."""
+    it = int(np.clip(it, 0, d.t.size - 1))
+    xw, k, wigner = compute_wigner_frame(d, it, state=state, max_points=max_points)
+    momentum_mask = _wigner_momentum_mask(k, pmax)
+    k_view = k[momentum_mask]
+    w_view = wigner[:, momentum_mask]
+    limit = _selected_population_bound(d, state) / np.pi
+
+    fig, (ax_density, ax_wigner) = plt.subplots(2, 1, figsize=(9, 8), constrained_layout=True)
+    _draw_density_and_pes(ax_density, d, it)
+    image = ax_wigner.imshow(
+        w_view.T,
+        origin="lower",
+        aspect="auto",
+        extent=(float(xw[0]), float(xw[-1]), float(k_view[0]), float(k_view[-1])),
+        cmap="RdBu_r",
+        vmin=-limit,
+        vmax=limit,
+        interpolation="bilinear",
+    )
+    ax_wigner.set(xlabel=r"$x\;(\AA)$", ylabel=r"$p/\hbar\;(\AA^{-1})$")
+    fig.colorbar(image, ax=ax_wigner, label=r"$W(x,p)$")
+    fig.suptitle(f"{state} phase space, t = {d.t[it]:.6g} fs")
+    if save:
+        fig.savefig(save, dpi=220, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        plt.show()
+
+
+def animate_phase_space(
+    d: TrajData,
+    every: int = 1,
+    state: str = "total",
+    max_points: Optional[int] = 256,
+    pmax: Optional[float] = None,
+    save: Optional[str] = None,
+    fps: int = 20,
+    dpi: int = 120,
+) -> None:
+    """Animate density over PES together with signed Wigner phase space."""
+    from matplotlib.animation import FuncAnimation
+
+    indices = np.arange(0, d.t.size, max(1, every), dtype=int)
+    first = int(indices[0])
+    xw, k, wigner = compute_wigner_frame(d, first, state=state, max_points=max_points)
+    momentum_mask = _wigner_momentum_mask(k, pmax)
+    k_view = k[momentum_mask]
+    limit = _selected_population_bound(d, state) / np.pi
+
+    fig, (ax_density, ax_wigner) = plt.subplots(2, 1, figsize=(9, 8), constrained_layout=True)
+    density_lines, potential_lines = _draw_density_and_pes(ax_density, d, first)
+    phase_image = ax_wigner.imshow(
+        wigner[:, momentum_mask].T,
+        origin="lower",
+        aspect="auto",
+        extent=(float(xw[0]), float(xw[-1]), float(k_view[0]), float(k_view[-1])),
+        cmap="RdBu_r",
+        vmin=-limit,
+        vmax=limit,
+        interpolation="bilinear",
+        animated=True,
+    )
+    ax_wigner.set(xlabel=r"$x\;(\AA)$", ylabel=r"$p/\hbar\;(\AA^{-1})$")
+    fig.colorbar(phase_image, ax=ax_wigner, label=r"$W(x,p)$")
+    title = fig.suptitle("")
+
+    def update(frame_number):
+        it = int(indices[frame_number])
+        for line, values in density_lines:
+            line.set_ydata(values[it])
+        for line, values in potential_lines:
+            current = _pot_at_step(values, it)
+            if current is not None:
+                line.set_ydata(np.ravel(current)[: line.get_xdata().size])
+        _, _, current_wigner = compute_wigner_frame(d, it, state=state, max_points=max_points)
+        phase_image.set_data(current_wigner[:, momentum_mask].T)
+        title.set_text(f"{state} phase space, t = {d.t[it]:.6g} fs")
+        return tuple([line for line, _ in density_lines] +
+                     [line for line, _ in potential_lines] + [phase_image, title])
+
+    animation = FuncAnimation(fig, update, frames=indices.size, interval=1000.0 / fps, blit=False)
+    if save:
+        suffix = save.lower().rsplit(".", 1)[-1] if "." in save else ""
+        if suffix == "gif":
+            animation.save(save, writer="pillow", fps=fps, dpi=dpi)
+        else:
+            animation.save(save, fps=fps, dpi=dpi)
+        plt.close(fig)
+    else:
+        plt.show()
+
+
+def plot_snapshot(d: TrajData, it: int, save: Optional[str] = None) -> None:
     it = int(np.clip(it, 0, d.t.size - 1))
     x, rho = _x_rho_view(d)
 
@@ -710,13 +994,7 @@ def plot_snapshot(d: TrajData, it: int) -> None:
 
     # Potentials on a twin axis
     pot_lines: List[Tuple[str, np.ndarray]] = []
-    for name, arr in [
-        (r"$V_{11}$", d.V11),
-        (r"$V_{22}$", d.V22),
-        (r"$V_{lower}$", d.V_lower),
-        (r"$V_{upper}$", d.V_upper),
-        (r"$V$", d.V),
-    ]:
+    for name, arr in _potential_choices(d):
         Vt = _pot_at_step(arr, it)
         if Vt is not None:
             pot_lines.append((name, np.ravel(Vt)))
@@ -740,10 +1018,20 @@ def plot_snapshot(d: TrajData, it: int) -> None:
         ax.legend(loc="best")
 
     ax.set_title(f"t = {d.t[it]:.6g} (snapshot {it})")
-    plt.show()
+    if save:
+        fig.savefig(save, dpi=220, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        plt.show()
 
 
-def animate(d: TrajData, every: int = 1) -> None:
+def animate(
+    d: TrajData,
+    every: int = 1,
+    save: Optional[str] = None,
+    fps: int = 20,
+    dpi: int = 120,
+) -> None:
     from matplotlib.animation import FuncAnimation
 
     x, rho = _x_rho_view(d)
@@ -766,13 +1054,7 @@ def animate(d: TrajData, every: int = 1) -> None:
     pot_arrays: List[np.ndarray] = []
     pot_lines = []
 
-    for name, arr in [
-        (r"$V_{11}$", d.V11),
-        (r"$V_{22}$", d.V22),
-        (r"$V_{lower}$", d.V_lower),
-        (r"$V_{upper}$", d.V_upper),
-        (r"$V$", d.V),
-    ]:
+    for name, arr in _potential_choices(d):
         if arr is not None:
             ax2 = ax2 or ax.twinx()
             pot_names.append(name)
@@ -850,8 +1132,17 @@ def animate(d: TrajData, every: int = 1) -> None:
         artists.extend(pot_lines)
         return tuple(artists)
 
-    ani = FuncAnimation(fig, update, frames=len(idxs), init_func=init, interval=40, blit=True)
-    plt.show()
+    ani = FuncAnimation(fig, update, frames=len(idxs), init_func=init,
+                        interval=1000.0 / fps, blit=True)
+    if save:
+        suffix = save.lower().rsplit(".", 1)[-1] if "." in save else ""
+        if suffix == "gif":
+            ani.save(save, writer="pillow", fps=fps, dpi=dpi)
+        else:
+            ani.save(save, fps=fps, dpi=dpi)
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 def compute_reactant_product_probabilities(d: TrajData, x_split: Optional[float] = None) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -870,8 +1161,8 @@ def compute_reactant_product_probabilities(d: TrajData, x_split: Optional[float]
     if not np.any(left) or not np.any(right):
         raise ValueError(f"Bad x_split={x_split}: one side is empty. Choose a split inside the x-grid range.")
 
-    pR = np.trapz(rho[:, left], x[left], axis=1)
-    pP = np.trapz(rho[:, right], x[right], axis=1)
+    pR = _trapezoid(rho[:, left], x[left], axis=1)
+    pP = _trapezoid(rho[:, right], x[right], axis=1)
     return pR, pP, float(x_split)
 
 
@@ -884,14 +1175,14 @@ def compute_state_average_positions(d: TrajData) -> Tuple[Optional[np.ndarray], 
     xavg2: Optional[np.ndarray] = None
 
     if d.rho1 is not None:
-        pop1 = np.trapz(d.rho1, d.x, axis=1)
-        num1 = np.trapz(d.rho1 * x, d.x, axis=1)
+        pop1 = _trapezoid(d.rho1, d.x, axis=1)
+        num1 = _trapezoid(d.rho1 * x, d.x, axis=1)
         with np.errstate(divide="ignore", invalid="ignore"):
             xavg1 = np.where(pop1 > 0.0, num1 / pop1, np.nan)
 
     if d.rho2 is not None:
-        pop2 = np.trapz(d.rho2, d.x, axis=1)
-        num2 = np.trapz(d.rho2 * x, d.x, axis=1)
+        pop2 = _trapezoid(d.rho2, d.x, axis=1)
+        num2 = _trapezoid(d.rho2 * x, d.x, axis=1)
         with np.errstate(divide="ignore", invalid="ignore"):
             xavg2 = np.where(pop2 > 0.0, num2 / pop2, np.nan)
 
@@ -924,8 +1215,8 @@ def plot_reactant_product_probabilities(d: TrajData, x_split: Optional[float] = 
     if not plotted_any:
         # Fall back to total density center-of-mass
         x, rho = _x_rho_view(d)
-        pop = np.trapz(rho, x, axis=1)
-        num = np.trapz(rho * x.reshape(1, -1), x, axis=1)
+        pop = _trapezoid(rho, x, axis=1)
+        num = _trapezoid(rho * x.reshape(1, -1), x, axis=1)
         with np.errstate(divide="ignore", invalid="ignore"):
             xavg = np.where(pop > 0.0, num / pop, np.nan)
         ax2.plot(d.t, xavg, label=r"$\langle\hat{x}\rangle_{total}$")
@@ -981,6 +1272,22 @@ def main():
     ap.add_argument("--snapshot", type=int, default=None, help="Plot a single snapshot index")
     ap.add_argument("--animate", action="store_true", help="Animate rho (and potentials if present) over time")
     ap.add_argument("--every", type=int, default=1, help="Use every Nth frame in animation")
+    ap.add_argument("--save-figure", default=None,
+                    help="Save snapshot to PNG/PDF instead of opening a window")
+    ap.add_argument("--save-animation", default=None,
+                    help="Save animation as GIF or MP4; implies --animate")
+    ap.add_argument("--fps", type=int, default=20, help="Saved/displayed animation frame rate")
+    ap.add_argument("--dpi", type=int, default=120, help="Saved animation resolution")
+
+    # Wigner phase-space diagnostics
+    ap.add_argument("--wigner", action="store_true",
+                    help="Add signed Wigner phase-space plot below density/PES")
+    ap.add_argument("--wigner-state", choices=("total", "state1", "state2"), default="total",
+                    help="Electronic component used for Wigner transform")
+    ap.add_argument("--wigner-points", type=int, default=256,
+                    help="Maximum uniform x-grid points used by Wigner transform")
+    ap.add_argument("--pmax", type=float, default=None,
+                    help="Display limit for abs(p/hbar) in inverse angstrom")
 
     # Populations vs time
     ap.add_argument("--populations", action="store_true", help="Plot reactant/product probabilities vs time (static)")
@@ -988,6 +1295,21 @@ def main():
     ap.add_argument("--save-pop", default=None, help="Save the populations plot to a file (e.g. pop.png, pop.pdf)")
 
     args = ap.parse_args()
+
+    if args.every < 1:
+        ap.error("--every must be positive")
+    if args.fps < 1:
+        ap.error("--fps must be positive")
+    if args.dpi < 1:
+        ap.error("--dpi must be positive")
+    if args.wigner_points < 4:
+        ap.error("--wigner-points must be at least four")
+    if args.snapshot is not None and (args.animate or args.save_animation):
+        ap.error("--snapshot cannot be combined with --animate/--save-animation")
+    if args.save_figure and (args.animate or args.save_animation):
+        ap.error("--save-figure is only valid for a snapshot")
+    if args.save_animation:
+        args.animate = True
 
     if args.print_tree:
         print_h5_tree(args.h5, max_lines=2000)
@@ -1023,10 +1345,34 @@ def main():
         plot_reactant_product_probabilities(d, x_split=args.x_split, save=args.save_pop)
         return
 
-    if args.snapshot is not None:
-        plot_snapshot(d, args.snapshot)
+    if args.wigner:
+        if args.animate:
+            animate_phase_space(
+                d,
+                every=args.every,
+                state=args.wigner_state,
+                max_points=args.wigner_points,
+                pmax=args.pmax,
+                save=args.save_animation,
+                fps=args.fps,
+                dpi=args.dpi,
+            )
+        else:
+            frame = args.snapshot if args.snapshot is not None else d.t.size - 1
+            plot_phase_space_snapshot(
+                d,
+                frame,
+                state=args.wigner_state,
+                max_points=args.wigner_points,
+                pmax=args.pmax,
+                save=args.save_figure,
+            )
+    elif args.snapshot is not None:
+        plot_snapshot(d, args.snapshot, save=args.save_figure)
     elif args.animate:
-        animate(d, every=max(1, args.every))
+        animate(d, every=args.every, save=args.save_animation, fps=args.fps, dpi=args.dpi)
+    elif args.save_figure:
+        plot_snapshot(d, d.t.size - 1, save=args.save_figure)
     else:
         # default: plot first and last snapshots
         plot_snapshot(d, 0)

@@ -3,6 +3,9 @@ set -eu
 cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/matplotlib" "$work/cache"
+export MPLCONFIGDIR="$work/matplotlib"
+export XDG_CACHE_HOME="$work/cache"
 root=$PWD
 fftw_cppflags=
 fftw_ldflags=
@@ -91,6 +94,11 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
     "$hdf5_python" "$root/analyze_ensemble.py" smoke_h5.traj000001.rank0.h5 \
       --output aggregate --skip-fit --no-plot
     "$hdf5_python" "$root/tests/check_ensemble_fit.py"
+    "$hdf5_python" "$root/tests/test_wigner.py"
+    MPLBACKEND=Agg "$hdf5_python" "$root/ShowDyn.py" smoke_h5.traj000001.rank0.h5 \
+      --no-usetex --snapshot 1 --wigner --wigner-points 32 \
+      --save-figure wigner-snapshot.png
+    test -s wigner-snapshot.png
     if "$hdf5_python" -c 'import scipy' >/dev/null 2>&1; then
       "$hdf5_python" "$root/tests/test_advanced.py"
       "$hdf5_python" "$root/tests/test_heom.py"

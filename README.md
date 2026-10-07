@@ -26,9 +26,17 @@ with active auxiliary-density memory (center), and exact four-spin-bath dynamics
 with trace-distance backflow (right). Temperatures and time windows differ; this
 figure demonstrates solver capabilities, not a like-for-like physical benchmark.*
 
-Additional illustrated results for multidimensional propagation, product-only
-Langevin relaxation and biexponential fitting, and controlled mechanism tests
-appear in the [framework notes](docs/QuantumDynamics_Framework_Notes.pdf).
+![Time-dependent density, potential surfaces, and signed Wigner phase space](docs/figures/wigner_phase_space.gif)
+
+*Product-damped H-transfer trajectory shown as coordinate density over diabatic
+and adiabatic potential surfaces (top) and total nuclear Wigner function (bottom).
+Red/blue phase-space lobes expose positive/negative quantum interference that a
+coordinate-density plot alone cannot show. Animation is illustrative and remains
+conditional on this trajectory's Hamiltonian, bath, and grid.*
+
+Additional illustrated results for multidimensional propagation, biexponential
+kinetics, and controlled mechanism tests appear in the
+[framework notes](docs/QuantumDynamics_Framework_Notes.pdf).
 
 Input from `INPUT.nml` uses chemistry-facing units: lengths in angstrom, times
 in femtoseconds, energies/couplings in cm^-1, rates in fs^-1, temperature in
@@ -64,6 +72,33 @@ trajectory-bootstrap rate intervals.
 
 HDF5 writes static potential surfaces only in first frame; stochastic surfaces
 remain frame-resolved. `ShowDyn.py` reuses single stored static surface for all frames.
+
+## Wigner phase space and wavepacket movies
+
+`ShowDyn.py` computes the signed Wigner representation directly from saved complex
+wavefunctions. Position is reported in angstrom and momentum as `p/hbar` in inverse
+angstrom. `total` traces over diabatic electronic state; `state1` and `state2` give
+component-resolved diagnostics. Default 256-point analysis grid limits quadratic
+phase-space cost while preserving wavepacket norm.
+
+```sh
+# Static density/PES and Wigner figure
+python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
+  --wigner --snapshot 20 --pmax 30 --save-figure wigner.png
+
+# Animated density/PES and Wigner phase space
+python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
+  --wigner --animate --every 5 --pmax 30 \
+  --save-animation wigner.gif --fps 12
+
+# Density and potential-surface movie without phase space
+python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
+  --animate --every 5 --save-animation density_pes.gif --fps 12
+```
+
+Negative Wigner values diagnose nonclassical coherence; Wigner function is a
+quasiprobability, not an ordinary probability distribution. Increase
+`--wigner-points` only after checking grid convergence.
 
 ## Checkpoint/restart
 

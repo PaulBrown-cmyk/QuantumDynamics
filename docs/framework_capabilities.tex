@@ -577,8 +577,42 @@ wavepackets. Population traces alone discard spatial phase, intersurface coheren
 and energy redistribution; mechanism analysis should therefore retain density,
 coherence, energy, and flux diagnostics when available.
 
+\subsection{Wavepacket and phase-space visualization}
+
 \code{ShowDyn.py} reads trajectory files, displays HDF5 trees, plots snapshots,
-animates densities and surfaces, and plots reactant/product probabilities.
+animates densities and surfaces, and plots reactant/product probabilities. For each
+pure diabatic component it can also evaluate the signed Wigner transform
+\begin{equation}
+ W_i(x,k;t)=\frac{1}{\pi}\int_{-\infty}^{\infty}
+ \psi_i^*(x+y,t)\psi_i(x-y,t)e^{2iky}\,dy,
+ \qquad k=\frac{p}{\hbar}.
+\end{equation}
+With $x$ in angstrom, $k$ is reported in angstrom$^{-1}$ and $W_i$ is
+dimensionless. The normalization is fixed by the marginals
+\begin{equation}
+ \int W_i(x,k;t)\,dk=|\psi_i(x,t)|^2,\qquad
+ \int W_i(x,k;t)\,dx=|\tilde\psi_i(k,t)|^2,\qquad
+ \iint W_i\,dx\,dk=P_i.
+\end{equation}
+The scalar total nuclear Wigner function is
+$W_{\rm nuc}=W_1+W_2$, which traces over the diabatic electronic state;
+state-resolved plots remain available. Off-diagonal electronic Wigner coherences
+are not folded into this scalar quantity.
+
+The implementation constructs the centered autocorrelation at each position and
+uses an FFT over relative displacement. Correlations extending outside the finite
+box are set to zero. Because phase-space output scales quadratically in grid size,
+visualization defaults to a uniform 256-point interpolation that preserves component
+norm; \code{--wigner-points} exposes a convergence control. Saved HDF5 files retain
+the original complex wavefunctions, so an $N_x^2$ Wigner array need not be stored at
+every frame. Red/blue animations combine time-dependent coordinate density and
+potential surfaces with positive/negative Wigner lobes. Negative values are a
+quasiprobability signature of coherent interference, not negative ordinary
+probability. Momentum range, phase-space grid, box, and snapshot cadence must all be
+checked before quantitative interpretation.
+
+\subsection{Kinetic and mechanism analysis}
+
 \code{analyze_ensemble.py} combines rank/trajectory files or reads the parallel
 single-file layout, checks common time
 grids, writes mean and standard-error populations, performs bounded mono- and
@@ -637,7 +671,7 @@ they are not universal predictions for hydrogen transfer. Every population, rate
 and mechanistic conclusion remains conditional on the stated Hamiltonian, bath,
 initial state, and convergence window.
 
-\begin{figure}[htbp]
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=\textwidth]{figures/open_system_hierarchy.png}
   \caption{Representative open-system calculations across the implemented model
@@ -683,6 +717,19 @@ initial state, and convergence window.
 
 \begin{figure}[htbp]
   \centering
+  \includegraphics[width=0.78\textwidth]{figures/wigner_phase_space.png}
+  \caption{Coordinate-space and phase-space view of the product-damped trajectory
+  at 1.0~ps. The upper panel overlays total and diabatic densities on the diabatic and
+  adiabatic potential surfaces. The lower panel shows the electronic-state-traced
+  nuclear Wigner function versus $x$ and $p/\hbar$. Positive and negative lobes resolve
+  counterpropagating structure and coherent interference hidden by $|\psi(x)|^2$.
+  This single-trajectory quasiprobability is diagnostic rather than a mechanism label;
+  stochastic ensemble claims require averaging consistently sampled trajectories.}
+  \label{fig:wigner-phase-space}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
   \includegraphics[width=0.94\textwidth]{figures/mechanism_controls.png}
   \caption{Automated five-control mechanism-attribution campaign, using four
   trajectories per control. (a) Initial classically allowed Wigner fraction, prompt
@@ -713,6 +760,8 @@ Regression coverage includes:
   \item smooth absorber norm removal;
   \item safe command-line help and explicit input paths;
   \item exact $t=0$, ASCII, dynamic-PES, and HDF5 output;
+  \item Wigner position and momentum marginals, norm-preserving resampling,
+        negative interference fringes, and end-to-end phase-space rendering;
   \item bitwise-identical checkpoint/restart with colored baths;
   \item two-rank single-file Parallel HDF5 MPI-IO output;
   \item KMS rate ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
@@ -729,6 +778,7 @@ Regression coverage includes:
   \item HDF5 and non-HDF5 builds under strict compiler warnings.
 \end{itemize}
 
+\clearpage
 \section{Example two-timescale kinetics}
 
 A 1.5 ps product-damped trajectory at 10 K produced a bounded
@@ -783,6 +833,7 @@ Non-Gaussian bath & \statusdone & Exact finite spin-bath dynamics implemented; a
 Correlated thermal initial state & \statusdone & Sparse stationary HEOM hierarchy and correlated system preparations implemented.\\
 Higher than two nuclear coordinates & \statusdone & Three explicit nuclear coordinates propagate with a norm-tested FFT solver.\\
 First-principles PES interface & \statusdone & Unit-checked HDF5 ingestion and interpolation implemented; electronic-structure generation remains external.\\
+Wigner phase-space diagnostics & \statusdone & State-resolved and electronic-state-traced transforms, static plots, and GIF/MP4 animations implemented.\\
 \bottomrule
 \end{tabular}
 \endgroup
@@ -826,6 +877,7 @@ python multidimensional_transfer_3d.py --output transfer_3d.h5
 python spin_bath_non_gaussian.py --output spin_bath.h5
 python convergence_campaign.py INPUT.nml --executable ./qle_1d
 python mechanism_attribution.py INPUT.nml --executable ./qle_1d
+python ShowDyn.py run.traj000001.rank0.h5 --wigner --animate --save-animation wigner.gif
 \end{verbatim}
 \endgroup
 
