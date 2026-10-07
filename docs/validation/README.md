@@ -53,3 +53,36 @@ not: sub-barrier transfer failed the contamination threshold, and D transfer was
 not suppressed relative to H. Therefore the old slow-rate=tunneling assignment
 is not supported for this parameter set. See
 [`mechanism/REPORT.md`](mechanism/REPORT.md).
+
+## Strong-coupling non-Markovian HEOM
+
+Command:
+
+```sh
+python heom_nonmarkovian.py --nx 12 --states 10 --depth 4 --matsubara 2 \
+  --temperature 300 --reorganization 500 --cutoff 0.04 \
+  --duration 100 --frames 101 \
+  --output advanced_models_20261007/heom/nonmarkovian.h5
+```
+
+- Drude bath memory time: `25 fs`
+- Reorganization/median-gap ratio: `4.4742674` (strong coupling)
+- Auxiliary density operators: `35`
+- Maximum trace error: `4.4431660e-16`
+- Maximum Hermiticity error: `3.4694470e-16`
+- Minimum root-density eigenvalue: `-1.2427030e-16` (roundoff)
+- Maximum auxiliary-memory norm: `0.96639610`
+- Final product population: `0.0011382594`
+
+Depth, Matsubara-pole, and system-basis convergence passed `0.02` population
+tolerance. Largest change was `1.6993067e-4` from adding two retained system states;
+depth and bath-pole changes were below `4.1e-8`. See
+[`heom/convergence/REPORT.md`](heom/convergence/REPORT.md).
+
+A separate 10 K run used eight Matsubara terms, hierarchy depth three, eight
+retained system states, and 220 ADOs for 60 fs. Maximum trace error was
+`3.3307014e-16`, minimum root-density eigenvalue was `-2.9908618e-11`, maximum
+auxiliary norm was `0.91704674`, and final product population was `0.00015677036`.
+Depth four, a ninth Matsubara pole, and two extra system states all passed the
+`0.02` tolerance; largest population change was `3.0453647e-4`. See
+[`heom/convergence_10K/REPORT.md`](heom/convergence_10K/REPORT.md).

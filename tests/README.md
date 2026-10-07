@@ -24,6 +24,10 @@ They exercise the production bath, split propagator, and writers:
 * Two-rank Parallel-HDF5 MPI-IO layout, units, finite values, and normalization.
 * Quantum-FDT KMS ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
   positivity, and thermalization.
+* Strong-coupling Drude-Lorentz HEOM: exact unitary limit, correlation-tail
+  sum rule, trace, Hermiticity, positivity, active memory ADOs, and measurable
+  departure from the hierarchy-free approximation.
+* End-to-end HEOM hierarchy, Matsubara-pole, and system-basis convergence.
 * Two-coordinate split-operator norm conservation.
 * End-to-end convergence and controlled-mechanism campaigns.
 

@@ -88,6 +88,26 @@ python quantum_fdt_density.py --temperature 100 --gamma 0.02 \
   --cutoff 0.2 --duration 200 --output quantum_density.h5
 ```
 
+`heom_nonmarkovian.py` covers strong-coupling, finite-memory physics for a harmonic
+Gaussian Drude-Lorentz bath. It propagates a scaled hierarchy of auxiliary density
+operators with one Drude and configurable Matsubara poles, plus a residual white-tail
+terminator. No Born, Markov, or secular approximation is made. Physical controls use
+K, cm^-1, fs^-1, and fs; HDF5 output includes the reduced density matrix, coordinate
+densities, populations, bath decomposition, and ADO-memory norm.
+
+```sh
+python heom_nonmarkovian.py --reorganization 500 --cutoff 0.04 \
+  --depth 4 --matsubara 2 --duration 100 --output heom_nonmarkovian.h5
+python heom_convergence.py --depth 3 --matsubara 2 --tolerance 0.02
+```
+
+HEOM is systematically converged in hierarchy depth, bath-pole count, and retained
+system states. Its declared physics is a linearly coupled harmonic Gaussian bath and
+a factorized initial preparation. Arbitrary non-Gaussian environments or direct
+real-time influence-functional path integration remain different model families.
+Low temperatures require more Matsubara poles; the supplied 10 K validation uses
+eight poles and checks a ninth.
+
 ## Multidimensional transfer
 
 `multidimensional_transfer.py` supplies a two-coordinate, two-diabatic-state FFT
@@ -99,6 +119,9 @@ It writes physical-unit 2D densities, surfaces, populations, and time to HDF5.
 
 `convergence_campaign.py` runs time-step, grid, box, absorber, and ensemble-size
 variants and writes machine-readable and Markdown pass/fail summaries.
+
+`heom_convergence.py` independently checks hierarchy depth, Matsubara-pole count,
+system-basis truncation, trace, Hermiticity, and positivity.
 
 `mechanism_attribution.py` preregisters coupling-off, sub-barrier H, sub-barrier D,
 and over-barrier controls. It reports classical Wigner above-barrier fractions,

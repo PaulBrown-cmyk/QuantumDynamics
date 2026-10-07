@@ -14,7 +14,7 @@
 \hypersetup{colorlinks=true,linkcolor=MidnightBlue,urlcolor=MidnightBlue}
 \setlist{nosep,leftmargin=*}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{5pt}
+\setlength{\parskip}{4pt}
 \setlength{\emergencystretch}{2em}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\statusdone}{\textcolor{ForestGreen}{Implemented}}
@@ -35,9 +35,9 @@ split-operator propagation, optional Markovian or exponentially correlated
 Langevin centroid damping, optional stochastic modulation of either well,
 MPI-distributed trajectories, OpenMP/FFTW acceleration, and physical-unit
 input/output. It also provides quantum-detailed-balance density dynamics,
-MPI-IO single-file output, exact restart, convergence campaigns, and controlled
-mechanism attribution. This note records equations, controls, tested behavior,
-analysis capability, and method boundaries.
+strong-coupling non-Markovian HEOM, MPI-IO single-file output, exact restart,
+convergence campaigns, and controlled mechanism attribution. This note records
+equations, controls, tested behavior, analysis capability, and method boundaries.
 \end{abstract}
 
 \begingroup
@@ -50,7 +50,8 @@ analysis capability, and method boundaries.
 \section{Scope and current status}
 
 Current code supports reproducible pure-state trajectories, ensemble kinetics,
-a two-coordinate wavepacket model, and a finite-grid reduced density matrix.
+a two-coordinate wavepacket model, and finite-grid reduced density matrices under
+weak-coupling Davies or strong-coupling HEOM dynamics.
 Input validation, unit conversion, FFT ordering, random-stream portability,
 restart identity, serial and parallel HDF5, state-selective damping, and output
 safety have regression coverage. It remains a parameterized nuclear-dynamics
@@ -130,7 +131,57 @@ and makes the Gibbs density matrix stationary. Stored output includes the full
 complex density matrix, physical coordinate densities, populations, energies,
 and a KMS residual. This is the controlled weak-coupling, Markovian quantum-FDT
 limit. Strong-coupling non-Markovian quantum baths require HEOM or an equivalent
-influence-functional method and are outside this solver's declared regime.
+influence-functional method and are outside this solver's declared regime. They
+are handled by the separate HEOM path below.
+
+\subsection{Strong-coupling non-Markovian HEOM}
+
+\code{heom_nonmarkovian.py} treats a harmonic Gaussian environment with linear
+system coupling operator $Q$ and Drude--Lorentz spectral density
+\begin{equation}
+ J(\omega)=\frac{2\lambda\gamma\omega}{\omega^2+\gamma^2},
+\end{equation}
+where $\lambda$ is reorganization energy and $\gamma^{-1}$ is bath memory time.
+The finite-temperature bath correlation is decomposed as
+\begin{equation}
+ C(t)=\sum_{k=0}^{K}c_k e^{-\nu_k t}+2\Delta_K\delta(t),
+\end{equation}
+with one Drude pole, $K$ Matsubara poles, and residual white-tail correction
+$\Delta_K$. Scaled auxiliary density operators $\tilde\rho_{\boldsymbol n}$ obey
+\begin{align}
+ \dot{\tilde\rho}_{\boldsymbol n}={}&-
+ \left(i\mathcal L+\sum_k n_k\nu_k+\Delta_K Q^\times Q^\times\right)
+ \tilde\rho_{\boldsymbol n} \nonumber\\
+ &-i\sum_k\sqrt{(n_k+1)|c_k|}\,Q^\times
+ \tilde\rho_{\boldsymbol n+\boldsymbol e_k} \nonumber\\
+ &-i\sum_k\sqrt{\frac{n_k}{|c_k|}}
+ \left(c_k Q\tilde\rho_{\boldsymbol n-\boldsymbol e_k}
+ -c_k^*\tilde\rho_{\boldsymbol n-\boldsymbol e_k}Q\right).
+\end{align}
+The root ADO is the physical reduced density matrix; higher ADOs retain bath
+memory and system--bath correlations. No Born, Markov, or secular approximation
+is used. Hierarchy depth, Matsubara count, and retained system states are explicit
+convergence axes. The declared regime assumes a harmonic Gaussian bath, linear
+coupling, Drude spectral density, and factorized initial preparation. This follows
+the nonperturbative reduced-hierarchy construction of Ishizaki and Tanimura
+(\href{https://doi.org/10.1143/JPSJ.74.3131}{JPSJ 74, 3131 (2005)}) and scaled
+hierarchy stabilization of Shi \emph{et al.}
+(\href{https://doi.org/10.1063/1.3077918}{JCP 130, 084105 (2009)}).
+
+A 100~fs strong-coupling validation used $\lambda=500$~cm$^{-1}$,
+$\gamma^{-1}=25$~fs, ten retained system states, two Matsubara terms, and
+hierarchy depth four (35 ADOs). The reorganization/median-gap ratio was 4.47,
+maximum ADO norm was 0.966, trace and Hermiticity errors were below
+$5\times10^{-16}$, and the minimum root-density eigenvalue was
+$-1.3\times10^{-16}$. Depth, bath-pole, and system-basis variants passed a
+0.02 population tolerance; the largest population change was
+$1.70\times10^{-4}$.
+
+A separate 10~K validation used eight Matsubara terms, hierarchy depth three,
+eight retained system states, and 220 ADOs. Depth four, a ninth Matsubara pole,
+and two extra system states all passed the same tolerance; the largest population
+change was $3.05\times10^{-4}$. Low-temperature calculations therefore remain
+supported, but require additional bath poles and convergence checks.
 
 \subsection{Stochastic potential bath}
 
@@ -258,6 +309,10 @@ above-barrier fractions, prompt transfer, isotope suppression, background,
 bounded rates, and SEM. A mechanism label is emitted only when all preregistered
 tests pass; otherwise the result is explicitly inconclusive.
 
+\code{heom_convergence.py} runs hierarchy-depth, Matsubara-pole, and retained
+system-basis variants. It gates population changes together with trace,
+Hermiticity, and positivity errors.
+
 \section{Verification status}
 
 Regression coverage includes:
@@ -277,6 +332,9 @@ Regression coverage includes:
   \item two-rank single-file Parallel HDF5 MPI-IO output;
   \item KMS rate ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
         and positivity;
+  \item HEOM unitary limit, bath-correlation sum rule, active memory ADOs,
+        strong-coupling invariants, and hierarchy-free departure;
+  \item HEOM hierarchy-depth, Matsubara-pole, and system-basis convergence;
   \item two-coordinate split-operator norm conservation;
   \item end-to-end convergence and mechanism-control campaigns;
   \item HDF5 and non-HDF5 builds under strict compiler warnings.
@@ -324,7 +382,10 @@ Density-matrix decoherence & \statusdone & Complete finite-grid reduced density 
 Multidimensional transfer & \statusdone & Two-coordinate, two-surface FFT propagation implemented and norm tested.\\
 Automated convergence campaign & \statusdone & Time-step, grid, box, absorber, and trajectory-count variants run automatically.\\
 Controlled mechanism assignment & \statusdone & Coupling, energy, isotope, prompt-transfer, rate, and SEM gates implemented.\\
-Strong-coupling non-Markovian quantum bath & \statusbound & Davies solver is weak-coupling/Markovian; HEOM is required outside that regime.\\
+Strong-coupling non-Markovian quantum bath & \statusdone & Scaled Drude--Lorentz HEOM retains finite bath memory and system--bath correlations.\\
+HEOM truncation control & \statusdone & Hierarchy depth, Matsubara poles, and system-state basis are automatically converged.\\
+Arbitrary non-Gaussian bath & \statusbound & Current HEOM assumes harmonic Gaussian modes, linear coupling, and Drude spectral density.\\
+Correlated thermal initial state & \statusbound & Current HEOM uses factorized preparation; imaginary-time HEOM is a separate extension.\\
 Higher than two nuclear coordinates & \statusbound & Current multidimensional reference solver contains two explicit coordinates.\\
 First-principles potentials & \statusbound & Potential parameters remain user supplied.\\
 \bottomrule
@@ -362,6 +423,8 @@ make test-parallel
 python analyze_ensemble.py 'run.traj*.rank*.h5' --output ensemble --bootstrap 500
 python ShowDyn.py run.traj000001.rank0.h5 --populations --no-usetex
 python quantum_fdt_density.py --output quantum_density.h5
+python heom_nonmarkovian.py --output heom_nonmarkovian.h5
+python heom_convergence.py --output heom_convergence
 python multidimensional_transfer.py --output transfer_2d.h5
 python convergence_campaign.py INPUT.nml --executable ./qle_1d
 python mechanism_attribution.py INPUT.nml --executable ./qle_1d
