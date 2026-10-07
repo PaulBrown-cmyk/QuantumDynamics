@@ -8,20 +8,23 @@ They exercise the production bath, split propagator, and writers:
 
 * gamma=0: two-component, unrenormalized norm after 100 free split steps.
 * White deterministic wavepacket mean: exp(-gamma*t).
+* Product-only damping: unchanged reactant momentum and relaxed product momentum.
 * Colored deterministic wavepacket mean: analytic exponential-memory solution.
 * Independent white and colored centroid ensembles: zero equilibrium mean and
   variance mass/beta (12,000 independent trajectories, 0.025 absolute tolerance).
+* Colored stochastic-potential initialization: stationary mean and variance.
+* Odd-sized FFT grids: correct positive/negative frequency ordering.
 * Physical-unit conversion for length, time, energy, rate, mass, temperature,
   wave number, force constants, and every potential-bath amplitude mode.
-* ASCII end-to-end output smoke test; HDF5 smoke test when HDF5 and Python h5py
-  are available.
+* CLI help safety, explicit input path, dynamic ASCII PES output, and HDF5 smoke
+  output when HDF5 and Python h5py are available.
 
-The implemented model is a classical-FDT thermostat of the shared nuclear
-wavepacket centroid. It preserves each pure-state trajectory's norm and applies
-identical kicks to both diabatic amplitudes. It does not thermalize intrinsic
-wavepacket momentum variance or implement quantum-frequency-dependent FDT,
-a density-matrix master equation, or separate surface-dependent baths.
-The extra stochastic potential bath is independent and is disabled in these tests.
+The implemented model is a classical-FDT centroid thermostat. It preserves each
+pure-state trajectory's norm. With both damping switches enabled, one shared kick
+acts on both amplitudes. Selective mode uses the chosen diabatic component's
+conditional centroid momentum and applies its kick only to that component. It
+does not thermalize intrinsic wavepacket momentum variance or implement
+quantum-frequency-dependent FDT or a density-matrix master equation.
 
 White noise uses the exact OU centroid update. For colored noise, with
 r=y-z and omega^2=gamma/tau, a half rotation of (p,r), an exact OU step,

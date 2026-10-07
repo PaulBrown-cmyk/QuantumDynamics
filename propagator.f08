@@ -103,6 +103,33 @@ CONTAINS
     pbar = SUM(prop%g%k*(ABS(prop%buf1)**2 + ABS(prop%buf2)**2))/weight
   END FUNCTION mean_momentum
 
+  FUNCTION component_momentum(prop, component) RESULT(pbar)
+    TYPE(SOProp), INTENT(INOUT) :: prop
+    INTEGER, INTENT(IN) :: component
+    REAL(dp) :: pbar, weight
+
+    SELECT CASE (component)
+    CASE (1)
+      CALL fftw_execute_dft(prop%p_f(1), prop%psi1, prop%buf1)
+      weight = SUM(ABS(prop%buf1)**2)
+      IF (weight > TINY(1.0_dp)) THEN
+        pbar = SUM(prop%g%k*ABS(prop%buf1)**2)/weight
+      ELSE
+        pbar = 0.0_dp
+      END IF
+    CASE (2)
+      CALL fftw_execute_dft(prop%p_f(3), prop%psi2, prop%buf2)
+      weight = SUM(ABS(prop%buf2)**2)
+      IF (weight > TINY(1.0_dp)) THEN
+        pbar = SUM(prop%g%k*ABS(prop%buf2)**2)/weight
+      ELSE
+        pbar = 0.0_dp
+      END IF
+    CASE DEFAULT
+      ERROR STOP 'component_momentum: component must be 1 or 2'
+    END SELECT
+  END FUNCTION component_momentum
+
   SUBROUTINE bath_kick(ctrl, prop, state, dt)
     TYPE(SimCtrl), INTENT(IN) :: ctrl
     TYPE(SOProp), INTENT(INOUT) :: prop
@@ -110,10 +137,21 @@ CONTAINS
     REAL(dp), INTENT(IN) :: dt
     REAL(dp) :: xi
     IF (.NOT. state%enabled) RETURN
-    CALL next_kick(state, ctrl, dt, xi, mean_momentum(prop))
-    ! Shared nuclear momentum translation, hbar=1; preserves both populations.
-    prop%psi1 = prop%psi1*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
-    prop%psi2 = prop%psi2*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
+    IF (.NOT. ctrl%damp_reactant .AND. .NOT. ctrl%damp_product) RETURN
+
+    IF (ctrl%damp_reactant .AND. ctrl%damp_product) THEN
+      CALL next_kick(state, ctrl, dt, xi, mean_momentum(prop))
+    ELSE IF (ctrl%damp_reactant) THEN
+      CALL next_kick(state, ctrl, dt, xi, component_momentum(prop, 1))
+    ELSE
+      CALL next_kick(state, ctrl, dt, xi, component_momentum(prop, 2))
+    END IF
+
+    ! Momentum translation, hbar=1; selective mode acts on one diabatic state.
+    IF (ctrl%damp_reactant) &
+      prop%psi1 = prop%psi1*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
+    IF (ctrl%damp_product) &
+      prop%psi2 = prop%psi2*EXP(CMPLX(0.0_dp, xi*prop%g%x, dp))
   END SUBROUTINE bath_kick
 
   SUBROUTINE step_langevin(ctrl, prop, state, dt)

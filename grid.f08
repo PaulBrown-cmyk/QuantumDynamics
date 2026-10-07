@@ -30,7 +30,8 @@ CONTAINS
 
     ! k-grid (FFT frequency convention, 2π periodicity over box length L)
     DO I = 1, nx
-      IF (I <= nx/2) THEN
+      ! Positive branch has one extra entry for odd nx.
+      IF (I <= (nx+1)/2) THEN
         g%k(I) = 2.0_dp*ACOS(-1.0_dp)*REAL(I-1, dp)/L
       ELSE
         g%k(I) = 2.0_dp*ACOS(-1.0_dp)*REAL(I-1-nx, dp)/L

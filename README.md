@@ -4,8 +4,10 @@ One-dimensional quantum dynamics for H-atom transfer between two coupled
 diabatic potential wells. Wavepackets propagate with a split-operator method.
 Reactant and product wells support stochastic coordinate-shift, curvature, and
 enthalpy modulation with independent or correlated noise. A Markovian or
-Lorentz-colored Langevin/GLE bath thermostats the shared nuclear wavepacket
-centroid using classical fluctuation-dissipation statistics.
+Lorentz-colored Langevin/GLE bath thermostats the nuclear wavepacket centroid
+using classical fluctuation-dissipation statistics. `damp_reactant` and
+`damp_product` select which diabatic state receives momentum damping; enabling
+both retains shared-centroid behavior.
 
 Input from `INPUT.nml` uses chemistry-facing units: lengths in angstrom, times
 in femtoseconds, energies/couplings in cm^-1, rates in fs^-1, temperature in
@@ -22,6 +24,11 @@ independent cm^-1 values; they are no longer overloaded as quartic coefficients.
 are derived internally and must not appear in `INPUT.nml`. This replaces old
 internal-unit `beta` input and fixed electron-mass propagation.
 
-Build with `make`; disable HDF5 support with `make USE_HDF5=0`. At runtime,
+Build with `make`; disable HDF5 support with `make USE_HDF5=0`. Run with
+`./qle_1d [INPUT.nml]`; `--help` never starts a simulation. At runtime,
 `hdf5=.false.` selects ASCII output even in HDF5-enabled builds. Run unit,
 FFTW, Langevin, and output smoke tests with `make test`.
+
+Random streams depend on trajectory number, not MPI rank, so changing rank
+count does not change a trajectory's stochastic sequence. Static ASCII PES
+uses `*.pes.dat`; stochastic PES snapshots use `*.sNNNNNN.pes.dat`.

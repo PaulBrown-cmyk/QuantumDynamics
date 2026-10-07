@@ -29,6 +29,8 @@
   temperature_k = 300.0,
   mass_amu      = 1.00784, ! neutral hydrogen-atom transfer mass
   gamma      = 20.6707,
+  damp_reactant = .false.,
+  damp_product  = .true.,
 
   ! Noise kernel for momentum bath (optional)
   use_colored = .true.,

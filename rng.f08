@@ -1,6 +1,7 @@
 !=============================== rng.f08 =====================================
 MODULE rng
   USE kinds
+  USE iso_fortran_env, ONLY: int64
   IMPLICIT NONE
 CONTAINS
 
@@ -12,9 +13,10 @@ CONTAINS
     CALL random_seed(size=n)
     ALLOCATE(s(n))
     DO i = 1, n
-      ! Simple deterministic scrambling for per-rank/per-traj streams.
-      ! NOTE: keep within default integer range.
-      s(i) = MOD(1103515245*(seed+i) + 12345, 2147483647)
+      ! Deterministic per-trajectory scrambling in 64-bit arithmetic; avoid undefined
+      ! default-integer overflow before reducing to random_seed's kind.
+      s(i) = INT(MODULO(1103515245_int64*(INT(seed, int64) + INT(i, int64)) + &
+                        12345_int64, 2147483647_int64), KIND(s))
       IF (s(i) == 0) s(i) = i
     END DO
     CALL random_seed(put=s)

@@ -25,17 +25,29 @@ ${FC:-gfortran} -x f95-cpp-input -cpp -O2 -fopenmp -fcheck=all -Wall -Wextra \
 OMP_NUM_THREADS=1 ./regression
 
 if [ -n "${QLE_EXE:-}" ] && [ -x "$QLE_EXE" ]; then
+  mkdir cli-help
+  (
+    cd cli-help
+    "$QLE_EXE" --help > help.txt
+    grep -q 'Usage: qle_1d' help.txt
+    if find . -type f \( -name '*.dat' -o -name '*.h5' \) | grep -q .; then
+      echo 'help option unexpectedly ran a trajectory' >&2
+      exit 1
+    fi
+  )
+  echo 'PASS command-line help safety'
+
   mkdir ascii-smoke
-  cp "$root/tests/INPUT.smoke.nml" ascii-smoke/INPUT.nml
   (
     cd ascii-smoke
-    OMPI_MCA_btl=self OMP_NUM_THREADS=2 "$QLE_EXE" > run.log
+    OMPI_MCA_btl=self OMP_NUM_THREADS=2 "$QLE_EXE" "$root/tests/INPUT.smoke.nml" > run.log
     test -s smoke.traj000001.rank0.s000001.dat
     test -s smoke.traj000001.rank0.s000002.dat
-    test -s smoke.traj000001.rank0.pes.dat
+    test -s smoke.traj000001.rank0.s000001.pes.dat
+    test -s smoke.traj000001.rank0.s000002.pes.dat
     test -s smoke.traj000001.rank0.obs.dat
     grep -q '# t(fs) =     0.010000' smoke.traj000001.rank0.s000001.dat
-    grep -q '# x(Ang)' smoke.traj000001.rank0.pes.dat
+    grep -q '# x(Ang)' smoke.traj000001.rank0.s000001.pes.dat
     if grep -Eiq 'nan|inf' ./*.dat; then
       echo 'non-finite ASCII output' >&2
       exit 1
@@ -53,7 +65,7 @@ if [ -n "${QLE_EXE:-}" ] && [ -x "$QLE_EXE" ]; then
       }
     ' smoke.traj000001.rank0.s000002.dat
   )
-  echo 'PASS ASCII physical-unit output'
+  echo 'PASS explicit input path and dynamic ASCII PES output'
 fi
 
 hdf5_python=

@@ -59,7 +59,8 @@ CONTAINS
     IF (gamma_eff < 0.0_dp .OR. dt < 0.0_dp) &
       ERROR STOP "Invalid Langevin gamma or dt"
     state%gamma = gamma_eff
-    state%enabled = (gamma_eff > 0.0_dp)
+    state%enabled = (gamma_eff > 0.0_dp) .AND. &
+                    (ctrl%damp_reactant .OR. ctrl%damp_product)
 
     IF (state%enabled .AND. (ctrl%beta <= 0.0_dp .OR. ctrl%mass <= 0.0_dp)) &
       ERROR STOP "Invalid Langevin beta or mass"

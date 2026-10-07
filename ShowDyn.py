@@ -892,8 +892,8 @@ def plot_reactant_product_probabilities(d: TrajData, x_split: Optional[float] = 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(8, 6))
 
     # Probabilities (left/right of dividing surface)
-    ax1.plot(d.t, pR, label=f"Reactant (x $\le$ {x0:g})")
-    ax1.plot(d.t, pP, label=f"Product (x $\gg$ {x0:g})")
+    ax1.plot(d.t, pR, label=rf"Reactant ($x \le {x0:g}$)")
+    ax1.plot(d.t, pP, label=rf"Product ($x > {x0:g}$)")
     ax1.plot(d.t, pR + pP, linestyle="--", label="Total")
     ax1.set_ylabel(r"$P(x,t)$", size=14)
     ax1.set_title(r"Reactant-Product probabilities and $\langle\hat{x}\rangle$ vs time")

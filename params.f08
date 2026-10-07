@@ -23,6 +23,8 @@ MODULE params
      REAL(dp)           :: beta = 0.0_dp             ! derived internal inverse energy, 1/E_h
      REAL(dp)           :: mass = 0.0_dp             ! derived internal mass, electron masses
      REAL(dp)           :: gamma = 0.02_dp           ! input fs^-1; internal 1/atomic-time after read
+     LOGICAL            :: damp_reactant = .true.    ! apply momentum bath to diabatic state 1
+     LOGICAL            :: damp_product  = .true.    ! apply momentum bath to diabatic state 2
      INTEGER            :: seed0 = 13579
 
      CHARACTER(16)      :: pot_model = 'harmonic' ! 'harmonic' or 'anharmonic'
@@ -64,8 +66,9 @@ MODULE params
 
 CONTAINS
 
-  SUBROUTINE read_input(ctrl)
+  SUBROUTINE read_input(ctrl, filename)
     TYPE(SimCtrl), INTENT(INOUT) :: ctrl
+    CHARACTER(*), OPTIONAL, INTENT(IN) :: filename
   
     ! Local mirrors for NAMELIST
     INTEGER :: nx, nsteps, save_every, ntraj, seed0
@@ -76,18 +79,23 @@ CONTAINS
     REAL(dp) :: bath_pot_sigma, bath_pot_fwhm
     LOGICAL :: bath_pot_reactant, bath_pot_product, bath_pot_coupled, bath_pot_colored
     LOGICAL :: use_colored, hdf5, want_coupling, use_exponential
+    LOGICAL :: damp_reactant, damp_product
     CHARACTER(16)  :: pot_model
     CHARACTER(16)  :: kernel
     CHARACTER(128) :: out_prefix
   
     namelist /qle/ nx, xmin, xmax, dt, nsteps, save_every, ntraj, temperature_k, mass_amu, gamma, &
+                   damp_reactant, damp_product, &
                    seed0, pot_model, k1, k2, x1, x2, v1_shift, v2_shift, c4_1, c4_2, &
                    v12, sigma, x0, p0, sigma0, use_colored, kernel, fwhm, out_prefix, hdf5, &
                    bath_pot_mode, bath_pot_sigma, bath_pot_fwhm, bath_pot_reactant, bath_pot_product, &
                    bath_pot_coupled, bath_pot_colored, want_coupling, use_exponential
   
     INTEGER :: iu, ios
-    CHARACTER(512) :: iomsg
+    CHARACTER(512) :: iomsg, input_file
+
+    input_file = 'INPUT.nml'
+    IF (PRESENT(filename)) input_file = TRIM(filename)
   
     ! Initialize locals from ctrl defaults
     nx         = ctrl%nx
@@ -100,6 +108,8 @@ CONTAINS
     temperature_k = ctrl%temperature_k
     mass_amu   = ctrl%mass_amu
     gamma      = ctrl%gamma
+    damp_reactant = ctrl%damp_reactant
+    damp_product  = ctrl%damp_product
     seed0      = ctrl%seed0
     pot_model  = ctrl%pot_model
     k1         = ctrl%k1
@@ -130,15 +140,15 @@ CONTAINS
     want_coupling = ctrl%want_coupling
     use_exponential = ctrl%use_exponential
   
-    OPEN(newunit=iu, FILE='INPUT.nml', STATUS='old', ACTION='read', IOSTAT=ios, IOMSG=iomsg)
+    OPEN(newunit=iu, FILE=TRIM(input_file), STATUS='old', ACTION='read', IOSTAT=ios, IOMSG=iomsg)
     IF (ios /= 0) THEN
-      WRITE(error_unit,'(a,1x,a)') 'Cannot open INPUT.nml:', TRIM(iomsg)
+      WRITE(error_unit,'(a,1x,a,2a)') 'Cannot open input file', TRIM(input_file), ': ', TRIM(iomsg)
       ERROR STOP 'input open failed'
     END IF
     READ(iu, nml=qle, IOSTAT=ios, IOMSG=iomsg)
     CLOSE(iu)
     IF (ios /= 0) THEN
-      WRITE(error_unit,'(a,1x,a)') 'Cannot parse INPUT.nml:', TRIM(iomsg)
+      WRITE(error_unit,'(a,1x,a,2a)') 'Cannot parse input file', TRIM(input_file), ': ', TRIM(iomsg)
       ERROR STOP 'input parse failed'
     END IF
   
@@ -153,8 +163,10 @@ CONTAINS
     ctrl%temperature_k = temperature_k
     ctrl%mass_amu   = mass_amu
     ctrl%gamma      = gamma
+    ctrl%damp_reactant = damp_reactant
+    ctrl%damp_product  = damp_product
     ctrl%seed0      = seed0
-    ctrl%pot_model  = pot_model
+    ctrl%pot_model  = lower_ascii(ADJUSTL(TRIM(pot_model)))
     ctrl%k1         = k1
     ctrl%k2         = k2
     ctrl%x1         = x1
@@ -169,7 +181,7 @@ CONTAINS
     ctrl%p0         = p0
     ctrl%sigma0     = sigma0
     ctrl%use_colored= use_colored
-    ctrl%kernel     = kernel
+    ctrl%kernel     = lower_ascii(ADJUSTL(TRIM(kernel)))
     ctrl%fwhm       = fwhm
     ctrl%bath_pot_mode     = bath_pot_mode
     ctrl%bath_pot_sigma    = bath_pot_sigma
@@ -211,11 +223,13 @@ CONTAINS
     IF (ctrl%bath_pot_mode < 0 .OR. ctrl%bath_pot_mode > 3) &
       ERROR STOP 'bath_pot_mode must be 0, 1, 2, or 3'
     IF (ctrl%bath_pot_sigma < 0.0_dp) ERROR STOP 'bath_pot_sigma must be nonnegative'
-    IF (ctrl%use_colored .AND. ctrl%gamma > 0.0_dp) THEN
+    IF (ctrl%use_colored .AND. ctrl%gamma > 0.0_dp .AND. &
+        (ctrl%damp_reactant .OR. ctrl%damp_product)) THEN
       IF (TRIM(ctrl%kernel) /= 'lorentz') ERROR STOP 'colored kernel must be lorentz'
       IF (ctrl%fwhm <= 0.0_dp) ERROR STOP 'colored fwhm must be positive'
     END IF
     IF (ctrl%bath_pot_mode /= 0 .AND. ctrl%bath_pot_colored .AND. &
+        (ctrl%bath_pot_reactant .OR. ctrl%bath_pot_product) .AND. &
         ctrl%bath_pot_sigma > 0.0_dp .AND. &
         ctrl%bath_pot_fwhm <= 0.0_dp) ERROR STOP 'colored bath_pot_fwhm must be positive'
   END SUBROUTINE validate_physical_input
@@ -270,6 +284,20 @@ CONTAINS
     END SELECT
     ctrl%units_converted = .TRUE.
   END SUBROUTINE convert_input_units
+
+
+  PURE FUNCTION lower_ascii(text) RESULT(lower)
+    CHARACTER(*), INTENT(IN) :: text
+    CHARACTER(LEN(text)) :: lower
+    INTEGER :: i, code
+
+    lower = text
+    DO i = 1, LEN(text)
+      code = IACHAR(text(i:i))
+      IF (code >= IACHAR('A') .AND. code <= IACHAR('Z')) &
+        lower(i:i) = ACHAR(code + IACHAR('a') - IACHAR('A'))
+    END DO
+  END FUNCTION lower_ascii
 
 
 END MODULE params

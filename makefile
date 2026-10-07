@@ -41,8 +41,20 @@ $(OBJDIR)/%.o: %.f08 | $(MODDIR) $(OBJDIR)
 qle_1d: $(OBJ)
 	$(MPIFC) $(FFLAGS) -o $@ $(OBJ) $(LDLIBS)
 
-$(OBJDIR)/params.o: $(OBJDIR)/constants.o
-$(OBJDIR)/io_hdf5.o: $(OBJDIR)/constants.o
+$(OBJDIR)/constants.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/mpi_env.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/timers.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/params.o: $(OBJDIR)/kinds.o $(OBJDIR)/constants.o
+$(OBJDIR)/rng.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/grid.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/potentials.o: $(OBJDIR)/kinds.o $(OBJDIR)/params.o $(OBJDIR)/rng.o
+$(OBJDIR)/fftwrap.o: $(OBJDIR)/kinds.o
+$(OBJDIR)/langevin.o: $(OBJDIR)/kinds.o $(OBJDIR)/params.o $(OBJDIR)/rng.o
+$(OBJDIR)/propagator.o: $(OBJDIR)/kinds.o $(OBJDIR)/params.o $(OBJDIR)/langevin.o \
+                         $(OBJDIR)/grid.o $(OBJDIR)/potentials.o $(OBJDIR)/fftwrap.o
+$(OBJDIR)/io_hdf5.o: $(OBJDIR)/kinds.o $(OBJDIR)/params.o $(OBJDIR)/constants.o \
+                      $(OBJDIR)/grid.o $(OBJDIR)/potentials.o
+$(OBJDIR)/main.o: $(filter-out $(OBJDIR)/main.o,$(OBJ))
 
 clean:
 	rm -rf build qle_1d *.h5 *.dat

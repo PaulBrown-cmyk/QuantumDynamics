@@ -36,7 +36,7 @@ CONTAINS
   SUBROUTINE potentials_bath_init(ctrl, dt)
     TYPE(SimCtrl), INTENT(IN) :: ctrl
     REAL(dp),      INTENT(IN) :: dt
-    REAL(dp) :: tau
+    REAL(dp) :: tau, z1, z2
 
     bath_pot%enabled = (ctrl%bath_pot_mode /= 0) .AND. (ctrl%bath_pot_sigma > 0.0_dp) .AND. &
                       (ctrl%bath_pot_reactant .OR. ctrl%bath_pot_product)
@@ -53,6 +53,16 @@ CONTAINS
         tau = 2.0_dp/ctrl%bath_pot_fwhm
         bath_pot%a = EXP(-dt/tau)
         bath_pot%s = ctrl%bath_pot_sigma*SQRT(MAX(0.0_dp, 1.0_dp - bath_pot%a*bath_pot%a))
+        ! Draw initial OU coordinates from stationary distribution.
+        CALL randn_gauss(z1, z2)
+        bath_pot%rt(1) = ctrl%bath_pot_sigma*z1
+        IF (bath_pot%coupled) THEN
+          bath_pot%rt(2) = bath_pot%rt(1)
+        ELSE
+          bath_pot%rt(2) = ctrl%bath_pot_sigma*z2
+        END IF
+        IF (.NOT. ctrl%bath_pot_reactant) bath_pot%rt(1) = 0.0_dp
+        IF (.NOT. ctrl%bath_pot_product ) bath_pot%rt(2) = 0.0_dp
       ELSE
         bath_pot%colored = .FALSE.
       END IF

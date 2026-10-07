@@ -5,7 +5,7 @@ MODULE io_hdf5
   USE constants, ONLY: ANGSTROM_TO_AU, AU_TO_ANGSTROM, AU_TO_CMINV, AU_TO_FS
   USE grid
   USE potentials, ONLY: v_two_surface, pes_on_grid
-  USE iso_fortran_env, ONLY: output_unit
+  USE iso_fortran_env, ONLY: error_unit
   USE omp_lib
 #ifdef USE_HDF5
   USE hdf5
@@ -100,8 +100,11 @@ CONTAINS
     CLOSE(iu_obs)
 
 
-    ! Also write the PES once (static) so plotting is possible even in ASCII mode.
-    IF (step == 1) THEN
+    ! A modulated PES changes every saved step; static PES keeps legacy name.
+    IF (ctrl%bath_pot_mode /= 0 .AND. ctrl%bath_pot_sigma > 0.0_dp .AND. &
+        (ctrl%bath_pot_reactant .OR. ctrl%bath_pot_product)) THEN
+      CALL ascii_write_pes(ctrl, g, rank, step)
+    ELSE IF (step == 1) THEN
       CALL ascii_write_pes(ctrl, g, rank)
     END IF
     DO i = 1, g%nx
@@ -113,15 +116,20 @@ CONTAINS
     CLOSE(iu)
   END SUBROUTINE ascii_write
 
-SUBROUTINE ascii_write_pes(ctrl, g, rank)
+SUBROUTINE ascii_write_pes(ctrl, g, rank, step)
   TYPE(SimCtrl),  INTENT(IN) :: ctrl
   TYPE(RealGrid), INTENT(IN) :: g
   INTEGER,        INTENT(IN) :: rank
+  INTEGER, OPTIONAL, INTENT(IN) :: step
   INTEGER :: i, iu
   CHARACTER(256) :: fname
   REAL(dp) :: v11, v22, v12, vavg, dlt, rad, v_lower, v_upper
 
-  WRITE(fname, '(a, ".rank",i0, ".pes.dat")') TRIM(ctrl%out_prefix), rank
+  IF (PRESENT(step)) THEN
+    WRITE(fname, '(a, ".rank",i0, ".s",i6.6,".pes.dat")') TRIM(ctrl%out_prefix), rank, step
+  ELSE
+    WRITE(fname, '(a, ".rank",i0, ".pes.dat")') TRIM(ctrl%out_prefix), rank
+  END IF
   OPEN(newunit=iu, FILE=fname, ACTION='write', STATUS='replace')
   WRITE(iu,'(a)') '# x(Ang)  V11(cm^-1)  V22(cm^-1)  V12(cm^-1)  V_lower(cm^-1)  V_upper(cm^-1)'
   DO i = 1, g%nx
@@ -158,8 +166,7 @@ END SUBROUTINE ascii_write_pes
 
     REAL(dp), ALLOCATABLE :: v11(:), v22(:), v12(:), v_lower(:), v_upper(:)
     REAL(dp), ALLOCATABLE :: vdiab(:,:), vadiab(:,:)
-    REAL(dp) :: vavg, dlt, rad
-    INTEGER  :: ix, nx
+    INTEGER  :: nx
 
     REAL(dp) :: pop1, pop2, xavg1, xavg2
 
@@ -169,6 +176,7 @@ END SUBROUTINE ascii_write_pes
     LOGICAL, SAVE :: hdf5_inited = .FALSE.
     IF (.NOT. hdf5_inited) THEN
       CALL h5open_f(ierr)
+      CALL require_h5(ierr, 'initialize HDF5', 'library')
       hdf5_inited = .TRUE.
     END IF
 
@@ -178,11 +186,10 @@ END SUBROUTINE ascii_write_pes
     CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
     ELSE
       CALL h5fopen_f(fname, H5F_ACC_RDWR_F, f, ierr)
-      IF (ierr /= 0) CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
     END IF
     IF (ierr /= 0) THEN
-      WRITE(output_unit,'(a,1x,a,1x,i0)') 'HDF5: failed to open/create file', TRIM(fname), ierr
-      RETURN
+      WRITE(error_unit,'(a,1x,a,1x,i0)') 'HDF5: failed to open/create file', TRIM(fname), ierr
+      ERROR STOP 'HDF5 file failure'
     END IF
 
     ! Use a relative group name (root-level). A leading '/' is fine too, but
@@ -195,9 +202,9 @@ END SUBROUTINE ascii_write_pes
       CALL h5gcreate_f(f, TRIM(gname), gid, ierr)
     END IF
     IF (ierr /= 0) THEN
-      WRITE(output_unit,'(a,1x,a,1x,i0)') 'HDF5: failed to open/create group', TRIM(gname), ierr
+      WRITE(error_unit,'(a,1x,a,1x,i0)') 'HDF5: failed to open/create group', TRIM(gname), ierr
       CALL h5fclose_f(f, ierr)
-      RETURN
+      ERROR STOP 'HDF5 group failure'
     END IF
 ! --- Static potential energy surfaces on the real-space grid -----------
 ! We write both diabatic surfaces (reactant/product) and the adiabatic
@@ -251,9 +258,20 @@ END SUBROUTINE ascii_write_pes
     DEALLOCATE(v11, v22, v12, v_lower, v_upper, vdiab, vadiab)
 
     CALL h5gclose_f(gid, ierr)
+    CALL require_h5(ierr, 'close group', TRIM(gname))
     CALL h5fclose_f(f, ierr)
+    CALL require_h5(ierr, 'close file', TRIM(fname))
 
   CONTAINS
+
+    SUBROUTINE require_h5(status, action, name)
+      INTEGER, INTENT(IN) :: status
+      CHARACTER(*), INTENT(IN) :: action, name
+      IF (status /= 0) THEN
+        WRITE(error_unit,'(4a,1x,i0)') 'HDF5: failed to ', TRIM(action), ' ', TRIM(name), status
+        ERROR STOP 'HDF5 operation failed'
+      END IF
+    END SUBROUTINE require_h5
 
     SUBROUTINE write_1d(loc, name, arr)
       INTEGER(hid_t), INTENT(IN) :: loc
@@ -265,19 +283,22 @@ END SUBROUTINE ascii_write_pes
       LOGICAL :: exists
       dims(1) = INT(SIZE(arr, 1), KIND=HSIZE_T)
       CALL h5screate_simple_f(1, dims, sid, ierr)
-      IF (ierr /= 0) RETURN
+      CALL require_h5(ierr, 'create dataspace for', TRIM(name))
 
       CALL h5lexists_f(loc, TRIM(name), exists, ierr)
+      CALL require_h5(ierr, 'check dataset', TRIM(name))
       IF (ierr == 0 .AND. exists) THEN
         CALL h5dopen_f(loc, TRIM(name), did, ierr)
       ELSE
         CALL h5dcreate_f(loc, TRIM(name), H5T_NATIVE_DOUBLE, sid, did, ierr)
       END IF
-      IF (ierr == 0) THEN
-        CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, arr, dims, ierr)
-        CALL h5dclose_f(did, ierr)
-      END IF
+      CALL require_h5(ierr, 'open/create dataset', TRIM(name))
+      CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, arr, dims, ierr)
+      CALL require_h5(ierr, 'write dataset', TRIM(name))
+      CALL h5dclose_f(did, ierr)
+      CALL require_h5(ierr, 'close dataset', TRIM(name))
       CALL h5sclose_f(sid, ierr)
+      CALL require_h5(ierr, 'close dataspace for', TRIM(name))
     END SUBROUTINE write_1d
 
     SUBROUTINE write_2d(loc, name, arr)
@@ -294,20 +315,23 @@ END SUBROUTINE ascii_write_pes
       dims(2) = INT(SIZE(arr, 2), KIND=HSIZE_T)
 
       CALL h5screate_simple_f(2, dims, sid, ierr)
-      IF (ierr /= 0) RETURN
+      CALL require_h5(ierr, 'create dataspace for', TRIM(name))
 
       CALL h5lexists_f(loc, TRIM(name), exists, ierr)
+      CALL require_h5(ierr, 'check dataset', TRIM(name))
       IF (ierr == 0 .AND. exists) THEN
         CALL h5dopen_f(loc, TRIM(name), did, ierr)
       ELSE
         CALL h5dcreate_f(loc, TRIM(name), H5T_NATIVE_DOUBLE, sid, did, ierr)
       END IF
-      IF (ierr == 0) THEN
-        CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, arr, dims, ierr)
-        CALL h5dclose_f(did, ierr)
-      END IF
+      CALL require_h5(ierr, 'open/create dataset', TRIM(name))
+      CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, arr, dims, ierr)
+      CALL require_h5(ierr, 'write dataset', TRIM(name))
+      CALL h5dclose_f(did, ierr)
+      CALL require_h5(ierr, 'close dataset', TRIM(name))
 
       CALL h5sclose_f(sid, ierr)
+      CALL require_h5(ierr, 'close dataspace for', TRIM(name))
     END SUBROUTINE write_2d
 
     SUBROUTINE write_c1d(loc, name, arr)
@@ -336,19 +360,22 @@ END SUBROUTINE ascii_write_pes
       LOGICAL :: exists
       dims(1) = 1_HSIZE_T
       CALL h5screate_simple_f(1, dims, sid, ierr)
-      IF (ierr /= 0) RETURN
+      CALL require_h5(ierr, 'create dataspace for', TRIM(name))
 
       CALL h5lexists_f(loc, TRIM(name), exists, ierr)
+      CALL require_h5(ierr, 'check dataset', TRIM(name))
       IF (ierr == 0 .AND. exists) THEN
         CALL h5dopen_f(loc, TRIM(name), did, ierr)
       ELSE
         CALL h5dcreate_f(loc, TRIM(name), H5T_NATIVE_DOUBLE, sid, did, ierr)
       END IF
-      IF (ierr == 0) THEN
-        CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, (/val/), dims, ierr)
-        CALL h5dclose_f(did, ierr)
-      END IF
+      CALL require_h5(ierr, 'open/create dataset', TRIM(name))
+      CALL h5dwrite_f(did, H5T_NATIVE_DOUBLE, (/val/), dims, ierr)
+      CALL require_h5(ierr, 'write dataset', TRIM(name))
+      CALL h5dclose_f(did, ierr)
+      CALL require_h5(ierr, 'close dataset', TRIM(name))
       CALL h5sclose_f(sid, ierr)
+      CALL require_h5(ierr, 'close dataspace for', TRIM(name))
     END SUBROUTINE write_scalar
 
   END SUBROUTINE h5_write

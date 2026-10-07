@@ -12,6 +12,7 @@ PROGRAM qle_1d
   USE potentials, ONLY: potentials_bath_init
   USE io_hdf5
   USE omp_lib
+  USE iso_fortran_env, ONLY: output_unit, error_unit
   IMPLICIT NONE
 
   TYPE(SimCtrl)       :: ctrl, ctrlT
@@ -23,9 +24,29 @@ PROGRAM qle_1d
   REAL(dp):: t0, t1, t
   INTEGER :: nth
   CHARACTER(256) :: traj_prefix
+  CHARACTER(512) :: input_path, arg
+  INTEGER :: nargs
+
+  nargs = COMMAND_ARGUMENT_COUNT()
+  input_path = 'INPUT.nml'
+  IF (nargs == 1) THEN
+    CALL GET_COMMAND_ARGUMENT(1, arg)
+    IF (TRIM(arg) == '-h' .OR. TRIM(arg) == '--help') THEN
+      CALL print_usage(output_unit)
+      STOP
+    ELSE IF (LEN_TRIM(arg) == 0 .OR. arg(1:1) == '-') THEN
+      WRITE(error_unit,'(2a)') 'Unknown option: ', TRIM(arg)
+      CALL print_usage(error_unit)
+      ERROR STOP 'bad command line'
+    END IF
+    input_path = TRIM(arg)
+  ELSE IF (nargs > 1) THEN
+    CALL print_usage(error_unit)
+    ERROR STOP 'too many command-line arguments'
+  END IF
 
   CALL mpi_start()
-  CALL read_input(ctrl)
+  CALL read_input(ctrl, TRIM(input_path))
 
   ! Divide trajectories across ranks
   my_first = (ctrl%ntraj*rank)/nprocs + 1
@@ -41,16 +62,16 @@ PROGRAM qle_1d
     WRITE(*,*) 'Welcome to the Quantum Dynamics world of Chemistry!'
     WRITE(*,*) '-------------------------------------------------------------------------------------------'
     WRITE(*,*) '                             by Dr. Paul A. Brown                 '
-    WRITE(*,*) 'This  code simulates the quantum dynamics of H-atom transfer with a ' 
-    WRITE(*,*) 'quantum Langevin eqation (QGLE). We model the dynamics of transfer '
-    WRITE(*,*) 'within a dissipative environment within the harmonic approximation '
-    WRITE(*,*) 'between two dibatic potential energy surfaces.'
+    WRITE(*,*) 'This code simulates quantum dynamics of H-atom transfer with a '
+    WRITE(*,*) 'quantum Langevin equation (QGLE). It models transfer in a dissipative '
+    WRITE(*,*) 'environment between two diabatic potential-energy surfaces.'
     WRITE(*,*) '-------------------------------------------------------------------------------------------'
   END IF
 
   IF (rank == 0) THEN
     WRITE(*,'(a, i0, a, i0)') 'MPI ranks: ', nprocs, ', OMP threads: ', nth
     WRITE(*,'(a, i0)')       'Trajectories total: ', ctrl%ntraj
+    WRITE(*,'(2a)')           'Input: ', TRIM(input_path)
   END IF
   WRITE(*,'(a, i0, a, i0, a, i0)') 'Rank ', rank, ' handles traj ', my_first, ' .. ', my_last
 
@@ -64,7 +85,8 @@ PROGRAM qle_1d
     WRITE(traj_prefix, '(a, ".traj", i6.6)') TRIM(ctrl%out_prefix), itraj
     ctrlT%out_prefix = TRIM(traj_prefix)
 
-    CALL seed_stream(ctrlT%seed0 + 100000*rank + itraj)
+    ! Stream depends only on trajectory index, not MPI decomposition.
+    CALL seed_stream(ctrlT%seed0 + itraj)
 
     CALL set_gaussian_packet(prop, ctrlT)
     CALL init_langevin(L, ctrlT, ctrlT%dt)
@@ -91,4 +113,12 @@ PROGRAM qle_1d
 
   CALL cleanup_fft_threads()
   CALL mpi_finish()
+
+CONTAINS
+
+  SUBROUTINE print_usage(unit)
+    INTEGER, INTENT(IN) :: unit
+    WRITE(unit,'(a)') 'Usage: qle_1d [INPUT.nml]'
+    WRITE(unit,'(a)') '       qle_1d --help'
+  END SUBROUTINE print_usage
 END PROGRAM qle_1d
