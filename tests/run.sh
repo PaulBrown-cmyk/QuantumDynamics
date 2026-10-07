@@ -94,6 +94,7 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
     if "$hdf5_python" -c 'import scipy' >/dev/null 2>&1; then
       "$hdf5_python" "$root/tests/test_advanced.py"
       "$hdf5_python" "$root/tests/test_heom.py"
+      "$hdf5_python" "$root/tests/test_remaining_physics.py"
       "$hdf5_python" "$root/heom_convergence.py" --nx 8 --states 6 \
         --depth 2 --matsubara 1 --duration 5 --frames 6 --tolerance 0.1 \
         --output heom-convergence

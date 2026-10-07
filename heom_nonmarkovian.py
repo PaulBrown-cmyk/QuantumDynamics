@@ -17,7 +17,9 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+from scipy import sparse
 from scipy.integrate import solve_ivp
+from scipy.sparse.linalg import spsolve
 
 from quantum_fdt_density import (
     ANGSTROM_TO_BOHR,
@@ -189,6 +191,19 @@ class ScaledHEOM:
             raise ValueError("times must be a strictly increasing vector")
         initial = np.zeros((self.nado, self.dimension, self.dimension), dtype=complex)
         initial[0] = initial_density
+        return self.solve_hierarchy(initial, times_au)
+
+    def solve_hierarchy(
+        self, initial_hierarchy: np.ndarray, times_au: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Propagate a complete ADO hierarchy, including correlated preparations."""
+        initial = np.asarray(initial_hierarchy, dtype=complex)
+        times_au = np.asarray(times_au, dtype=float)
+        expected = (self.nado, self.dimension, self.dimension)
+        if initial.shape != expected:
+            raise ValueError(f"initial hierarchy shape must be {expected}")
+        if times_au.ndim != 1 or times_au.size < 2 or np.any(np.diff(times_au) <= 0.0):
+            raise ValueError("times must be a strictly increasing vector")
         solution = solve_ivp(
             self.derivative,
             (float(times_au[0]), float(times_au[-1])),
@@ -207,13 +222,106 @@ class ScaledHEOM:
         ado_norms = np.linalg.norm(hierarchy[:, 1:].reshape(times_au.size, -1), axis=1)
         return roots, ado_norms
 
+    def liouvillian(self) -> sparse.csr_matrix:
+        """Return sparse HEOM generator using row-major matrix vectorization."""
+        dimension = self.dimension
+        block_size = dimension * dimension
+        identity = sparse.identity(dimension, dtype=complex, format="csr")
+        block_identity = sparse.identity(block_size, dtype=complex, format="csr")
+        hamiltonian = sparse.csr_matrix(self.hamiltonian)
+        coupling = sparse.csr_matrix(self.coupling)
+        commutator_h = sparse.kron(hamiltonian, identity) - sparse.kron(
+            identity, hamiltonian.T
+        )
+        commutator_q = sparse.kron(coupling, identity) - sparse.kron(
+            identity, coupling.T
+        )
+        coupling_squared = coupling @ coupling
+        double_commutator_q = (
+            sparse.kron(coupling_squared, identity)
+            - 2.0 * sparse.kron(coupling, coupling.T)
+            + sparse.kron(identity, coupling_squared.T)
+        )
+        blocks: list[list[sparse.spmatrix | None]] = [
+            [None] * self.nado for _ in range(self.nado)
+        ]
+        for ado_index, entry in enumerate(self.indices):
+            diagonal = -1.0j * commutator_h - self.decay[ado_index] * block_identity
+            if self.tail != 0.0:
+                diagonal = diagonal - self.tail * double_commutator_q
+            blocks[ado_index][ado_index] = diagonal
+            for term, occupation in enumerate(entry):
+                magnitude = abs(self.coefficients[term])
+                upper_index = self.up[ado_index, term]
+                if upper_index >= 0 and magnitude > 0.0:
+                    factor = np.sqrt((occupation + 1) * magnitude)
+                    blocks[ado_index][upper_index] = -1.0j * factor * commutator_q
+                lower_index = self.down[ado_index, term]
+                if lower_index >= 0 and magnitude > 0.0:
+                    coefficient = self.coefficients[term]
+                    factor = np.sqrt(occupation / magnitude)
+                    lower_block = (
+                        -1.0j
+                        * factor
+                        * (
+                            coefficient * sparse.kron(coupling, identity)
+                            - coefficient.conjugate()
+                            * sparse.kron(identity, coupling.T)
+                        )
+                    )
+                    blocks[ado_index][lower_index] = lower_block
+        return sparse.bmat(blocks, format="csr")
+
+    def equilibrium_hierarchy(self) -> tuple[np.ndarray, float]:
+        """Solve the truncated real-time HEOM stationary state with unit trace.
+
+        The resulting nonzero ADOs encode the correlated thermal preparation.
+        At converged hierarchy/bath truncation this stationary hierarchy is the
+        real-time counterpart of imaginary-time HEOM thermal initialization.
+        """
+        generator = self.liouvillian().tolil()
+        size = generator.shape[0]
+        constraint_row = 0
+        generator.rows[constraint_row] = []
+        generator.data[constraint_row] = []
+        for diagonal in range(self.dimension):
+            generator[constraint_row, diagonal * self.dimension + diagonal] = 1.0
+        right_hand_side = np.zeros(size, dtype=complex)
+        right_hand_side[constraint_row] = 1.0
+        flat = spsolve(generator.tocsr(), right_hand_side)
+        if not np.all(np.isfinite(flat)):
+            raise RuntimeError("stationary HEOM solve produced non-finite values")
+        hierarchy = flat.reshape((self.nado, self.dimension, self.dimension))
+        residual = float(np.linalg.norm(self.derivative(0.0, flat)))
+        return hierarchy, residual
+
+    def prepare_correlated(
+        self, equilibrium_hierarchy: np.ndarray, operator: np.ndarray
+    ) -> np.ndarray:
+        """Apply a system preparation operator to every equilibrium ADO."""
+        hierarchy = np.asarray(equilibrium_hierarchy, dtype=complex)
+        operator = np.asarray(operator, dtype=complex)
+        if hierarchy.shape != (self.nado, self.dimension, self.dimension):
+            raise ValueError("equilibrium hierarchy shape mismatch")
+        if operator.shape != (self.dimension, self.dimension):
+            raise ValueError("preparation operator shape mismatch")
+        prepared = np.asarray(
+            [operator @ ado @ operator.conj().T for ado in hierarchy], dtype=complex
+        )
+        normalization = np.trace(prepared[0])
+        if abs(normalization) <= 1.0e-14:
+            raise ValueError("preparation operator has zero equilibrium probability")
+        prepared /= normalization
+        return prepared
+
 
 def simulate_model(
     model: Model,
     config: HEOMConfig,
     duration_fs: float,
     frames: int,
-) -> dict[str, np.ndarray | float | int]:
+    initial_preparation: str = "factorized",
+) -> dict[str, np.ndarray | float | int | str]:
     if duration_fs <= 0.0 or frames < 2:
         raise ValueError("duration and frames must be positive")
     x, full_hamiltonian = build_hamiltonian(model)
@@ -235,7 +343,18 @@ def simulate_model(
     initial_density = np.outer(projected, projected.conj())
     solver = ScaledHEOM(hamiltonian, coupling, config)
     times_fs = np.linspace(0.0, duration_fs, frames)
-    root_energy, ado_norm = solver.solve(initial_density, times_fs * FS_TO_AU)
+    equilibrium_residual = 0.0
+    initial_auxiliary_norm = 0.0
+    if initial_preparation == "factorized":
+        root_energy, ado_norm = solver.solve(initial_density, times_fs * FS_TO_AU)
+    elif initial_preparation in ("correlated-equilibrium", "correlated-projected"):
+        equilibrium, equilibrium_residual = solver.equilibrium_hierarchy()
+        if initial_preparation == "correlated-projected":
+            equilibrium = solver.prepare_correlated(equilibrium, initial_density)
+        initial_auxiliary_norm = float(np.linalg.norm(equilibrium[1:]))
+        root_energy, ado_norm = solver.solve_hierarchy(equilibrium, times_fs * FS_TO_AU)
+    else:
+        raise ValueError(f"unknown initial preparation: {initial_preparation}")
 
     nx = model.nx
     dx = float(x[1] - x[0])
@@ -288,11 +407,16 @@ def simulate_model(
         "min_density_eigenvalue": float(min_eigenvalue),
         "max_auxiliary_norm": float(np.max(ado_norm)),
         "reorganization_to_gap_ratio": float(coupling_ratio),
+        "initial_preparation": initial_preparation,
+        "equilibrium_residual": equilibrium_residual,
+        "initial_auxiliary_norm": initial_auxiliary_norm,
     }
 
 
 def write_output(
-    path: Path, result: dict[str, np.ndarray | float | int], config: HEOMConfig
+    path: Path,
+    result: dict[str, np.ndarray | float | int | str],
+    config: HEOMConfig,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(path, "w") as handle:
@@ -336,6 +460,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--frames", type=int, default=101)
     result.add_argument("--rtol", type=float, default=2.0e-8)
     result.add_argument("--atol", type=float, default=2.0e-10)
+    result.add_argument(
+        "--initial-preparation",
+        choices=("factorized", "correlated-equilibrium", "correlated-projected"),
+        default="factorized",
+        help="HEOM hierarchy initialization",
+    )
     return result
 
 
@@ -358,7 +488,9 @@ def main() -> None:
         rtol=args.rtol,
         atol=args.atol,
     )
-    result = simulate_model(model, config, args.duration, args.frames)
+    result = simulate_model(
+        model, config, args.duration, args.frames, args.initial_preparation
+    )
     write_output(Path(args.output), result, config)
     print("Strong-coupling non-Markovian HEOM complete")
     for name in (
@@ -369,6 +501,9 @@ def main() -> None:
         "min_density_eigenvalue",
         "max_auxiliary_norm",
         "reorganization_to_gap_ratio",
+        "initial_preparation",
+        "equilibrium_residual",
+        "initial_auxiliary_norm",
     ):
         print(f"{name}: {result[name]}")
 

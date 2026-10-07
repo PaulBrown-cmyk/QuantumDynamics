@@ -4,7 +4,7 @@
 \usepackage{lmodern}
 \usepackage[margin=0.75in]{geometry}
 \usepackage{amsmath,amssymb}
-\usepackage{booktabs,longtable,array}
+\usepackage{booktabs,array}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{hyperref}
 \usepackage{enumitem}
@@ -20,6 +20,7 @@
 \newcommand{\statusdone}{\textcolor{ForestGreen}{Implemented}}
 \newcommand{\statusbound}{\textcolor{BurntOrange}{Model bound}}
 \pagestyle{plain}
+\raggedbottom
 
 \title{QuantumDynamics Framework and Capability Notes}
 \author{Paul A. Brown}
@@ -29,13 +30,14 @@
 \maketitle
 
 \begin{abstract}
-QuantumDynamics is a family of one- and two-coordinate, two-diabatic-state
+QuantumDynamics is a family of one-, two-, and three-coordinate, two-diabatic-state
 wavepacket and reduced-density-matrix tools for hydrogen-atom transfer. It combines
 split-operator propagation, optional Markovian or exponentially correlated
 Langevin centroid damping, optional stochastic modulation of either well,
 MPI-distributed trajectories, OpenMP/FFTW acceleration, and physical-unit
 input/output. It also provides quantum-detailed-balance density dynamics,
-strong-coupling non-Markovian HEOM, MPI-IO single-file output, exact restart,
+strong-coupling non-Markovian HEOM, an exact finite spin-bath model,
+MPI-IO single-file output, exact restart,
 convergence campaigns, and controlled mechanism attribution. This note records
 equations, controls, tested behavior, analysis capability, and method boundaries.
 \end{abstract}
@@ -50,7 +52,7 @@ equations, controls, tested behavior, analysis capability, and method boundaries
 \section{Scope and current status}
 
 Current code supports reproducible pure-state trajectories, ensemble kinetics,
-a two-coordinate wavepacket model, and finite-grid reduced density matrices under
+two- and three-coordinate wavepacket models, and finite-grid reduced density matrices under
 weak-coupling Davies or strong-coupling HEOM dynamics.
 Input validation, unit conversion, FFT ordering, random-stream portability,
 restart identity, serial and parallel HDF5, state-selective damping, and output
@@ -162,11 +164,19 @@ The root ADO is the physical reduced density matrix; higher ADOs retain bath
 memory and system--bath correlations. No Born, Markov, or secular approximation
 is used. Hierarchy depth, Matsubara count, and retained system states are explicit
 convergence axes. The declared regime assumes a harmonic Gaussian bath, linear
-coupling, Drude spectral density, and factorized initial preparation. This follows
+coupling, and Drude spectral density. This follows
 the nonperturbative reduced-hierarchy construction of Ishizaki and Tanimura
 (\href{https://doi.org/10.1143/JPSJ.74.3131}{JPSJ 74, 3131 (2005)}) and scaled
 hierarchy stabilization of Shi \emph{et al.}
 (\href{https://doi.org/10.1063/1.3077918}{JCP 130, 084105 (2009)}).
+
+Factorized, correlated-equilibrium, and correlated-projected preparations are
+available. Correlated equilibrium is obtained by solving the sparse stationary
+truncated HEOM with a unit-trace constraint; a system preparation operator is then
+applied to every ADO for correlated nonequilibrium initialization. At converged
+hierarchy and bath expansion, the stationary real-time hierarchy corresponds to the
+thermal hierarchy generated along imaginary time, as established by Tanimura
+(\href{https://doi.org/10.1063/1.4890441}{JCP 141, 044114 (2014)}).
 
 A 100~fs strong-coupling validation used $\lambda=500$~cm$^{-1}$,
 $\gamma^{-1}=25$~fs, ten retained system states, two Matsubara terms, and
@@ -182,6 +192,23 @@ eight retained system states, and 220 ADOs. Depth four, a ninth Matsubara pole,
 and two extra system states all passed the same tolerance; the largest population
 change was $3.05\times10^{-4}$. Low-temperature calculations therefore remain
 supported, but require additional bath poles and convergence checks.
+
+\subsection{Exact non-Gaussian spin bath}
+
+\code{spin_bath_non_gaussian.py} exactly diagonalizes a two-state transfer system
+coupled to finite spin-$1/2$ modes,
+\begin{equation}
+ H=H_S+\sum_j\frac{\omega_j}{2}\sigma_j^z+
+ Q\sum_j g_j\sigma_j^x.
+\end{equation}
+Thermal product-bath initialization, exact unitary evolution, and exact partial trace
+yield the reduced density matrix without Gaussian, Born, Markov, or secular
+assumptions. Output includes trace distance and information backflow. This finite
+non-Gaussian reference model follows exact spin-star treatments such as Semin,
+Sinayskiy, and Petruccione
+(\href{https://doi.org/10.1103/PhysRevA.89.012107}{PRA 89, 012107 (2014)}).
+Hilbert-space cost is exponential, so the implementation enforces at most ten bath
+spins; it does not represent an arbitrary macroscopic non-Gaussian environment.
 
 \subsection{Stochastic potential bath}
 
@@ -211,6 +238,21 @@ with independent mass. Shifted harmonic valleys contain reaction-path coupling,
 and the diabatic coupling is Gaussian in both coordinates. The solver writes
 physical-unit two-dimensional densities and potential surfaces to HDF5.
 
+\subsection{Three-coordinate propagation and external PES data}
+
+\code{multidimensional_transfer_3d.py} propagates
+$\Psi(x,y,z,t)$ using a three-dimensional FFT split operator. Coordinate $x$ is
+H transfer; $y$ and $z$ are independent promoting modes with separate masses and
+reaction-path couplings. The analytic model or an external Hermitian diabatic PES
+may supply $V_{11}$, $V_{22}$, and complex $V_{12}$.
+
+\code{potential_data.py} defines the external HDF5 schema, rejects missing or
+incorrect units, validates finite monotone axes and array shapes, performs trilinear
+interpolation, and converts angstrom/cm$^{-1}$ data to atomic units once. Thus
+first-principles PES data can enter dynamics without manual unit handling. Electronic-
+structure generation remains the responsibility of an external code; no dynamics
+package can infer a first-principles PES from absent electronic-structure data.
+
 \section{Units and input boundary}
 
 Namelist input uses chemistry-facing units and converts once to atomic units.
@@ -234,14 +276,14 @@ Wave number & angstrom$^{-1}$ & bohr$^{-1}$\\
 \end{tabular}
 \end{center}
 
+\newpage
 \section{Primary controls}
 
 \begingroup\setlength{\parskip}{0pt}
-\begin{longtable}{>{\raggedright\arraybackslash}p{0.35\textwidth}p{0.57\textwidth}}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.35\textwidth}p{0.57\textwidth}}
 \toprule
 \normalfont Control & Meaning\\
 \midrule
-\endhead
 \code{nx, xmin, xmax} & Periodic real-space grid and physical box.\\
 \code{dt, nsteps, save_every} & Physical time step, total steps, and output cadence.\\
 \code{ntraj, seed0} & Number of independent stochastic trajectories and base seed.\\
@@ -263,7 +305,7 @@ Wave number & angstrom$^{-1}$ & bohr$^{-1}$\\
 \code{restart_from_checkpoint} & Continue from exact trajectory checkpoint.\\
 \code{parallel_hdf5} & Write trajectory/frame hyperslabs to one MPI-IO HDF5 file.\\
 \bottomrule
-\end{longtable}
+\end{tabular}
 \endgroup
 
 Input may be supplied as \code{./qle_1d INPUT.nml}. Running
@@ -336,6 +378,10 @@ Regression coverage includes:
         strong-coupling invariants, and hierarchy-free departure;
   \item HEOM hierarchy-depth, Matsubara-pole, and system-basis convergence;
   \item two-coordinate split-operator norm conservation;
+  \item stationary correlated HEOM residual, nonzero ADO correlations, and
+        correlated-preparation propagation;
+  \item exact finite spin-bath trace, positivity, and information backflow;
+  \item three-coordinate norm conservation and external-PES round trip;
   \item end-to-end convergence and mechanism-control campaigns;
   \item HDF5 and non-HDF5 builds under strict compiler warnings.
 \end{itemize}
@@ -365,11 +411,10 @@ empirical timescale rather than a demonstrated tunneling rate.
 \section{Completed limitations and method boundaries}
 
 \begingroup\setlength{\parskip}{0pt}
-\begin{longtable}{>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.41\textwidth}}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.41\textwidth}}
 \toprule
 Item & Status & Note\\
 \midrule
-\endhead
 Missing $t=0$ output & \statusdone & Exact initial frame now optional and enabled by default.\\
 Periodic boundary return & \statusdone & Smooth absorbing layers available; convergence remains user responsibility.\\
 MPI/rank aggregation & \statusdone & Ensemble tool reports means, SEM, fits, and bootstrap intervals.\\
@@ -379,17 +424,17 @@ Checkpoint/restart & \statusdone & Versioned HDF5 stores all dynamic and random 
 Single-file parallel HDF5 & \statusdone & Parallel-HDF5 build writes one fixed-shape MPI-IO ensemble file.\\
 Quantum FDT & \statusdone & Density solver enforces frequency-resolved KMS detailed balance and Gibbs stationarity.\\
 Density-matrix decoherence & \statusdone & Complete finite-grid reduced density matrix evolves under a CP Davies generator.\\
-Multidimensional transfer & \statusdone & Two-coordinate, two-surface FFT propagation implemented and norm tested.\\
+Multidimensional transfer & \statusdone & Two- and three-coordinate, two-surface FFT propagation implemented and norm tested.\\
 Automated convergence campaign & \statusdone & Time-step, grid, box, absorber, and trajectory-count variants run automatically.\\
 Controlled mechanism assignment & \statusdone & Coupling, energy, isotope, prompt-transfer, rate, and SEM gates implemented.\\
 Strong-coupling non-Markovian quantum bath & \statusdone & Scaled Drude--Lorentz HEOM retains finite bath memory and system--bath correlations.\\
 HEOM truncation control & \statusdone & Hierarchy depth, Matsubara poles, and system-state basis are automatically converged.\\
-Arbitrary non-Gaussian bath & \statusbound & Current HEOM assumes harmonic Gaussian modes, linear coupling, and Drude spectral density.\\
-Correlated thermal initial state & \statusbound & Current HEOM uses factorized preparation; imaginary-time HEOM is a separate extension.\\
-Higher than two nuclear coordinates & \statusbound & Current multidimensional reference solver contains two explicit coordinates.\\
-First-principles potentials & \statusbound & Potential parameters remain user supplied.\\
+Non-Gaussian bath & \statusdone & Exact finite spin-bath dynamics implemented; arbitrary macroscopic non-Gaussian baths remain model specific.\\
+Correlated thermal initial state & \statusdone & Sparse stationary HEOM hierarchy and correlated system preparations implemented.\\
+Higher than two nuclear coordinates & \statusdone & Three explicit nuclear coordinates propagate with a norm-tested FFT solver.\\
+First-principles PES interface & \statusdone & Unit-checked HDF5 ingestion and interpolation implemented; electronic-structure generation remains external.\\
 \bottomrule
-\end{longtable}
+\end{tabular}
 \endgroup
 
 ``Definitive'' mechanism assignment means definitive only for the declared
@@ -424,8 +469,11 @@ python analyze_ensemble.py 'run.traj*.rank*.h5' --output ensemble --bootstrap 50
 python ShowDyn.py run.traj000001.rank0.h5 --populations --no-usetex
 python quantum_fdt_density.py --output quantum_density.h5
 python heom_nonmarkovian.py --output heom_nonmarkovian.h5
+python heom_nonmarkovian.py --initial-preparation correlated-projected
 python heom_convergence.py --output heom_convergence
 python multidimensional_transfer.py --output transfer_2d.h5
+python multidimensional_transfer_3d.py --output transfer_3d.h5
+python spin_bath_non_gaussian.py --output spin_bath.h5
 python convergence_campaign.py INPUT.nml --executable ./qle_1d
 python mechanism_attribution.py INPUT.nml --executable ./qle_1d
 \end{verbatim}

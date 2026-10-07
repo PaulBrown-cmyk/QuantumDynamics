@@ -86,3 +86,38 @@ auxiliary norm was `0.91704674`, and final product population was `0.00015677036
 Depth four, a ninth Matsubara pole, and two extra system states all passed the
 `0.02` tolerance; largest population change was `3.0453647e-4`. See
 [`heom/convergence_10K/REPORT.md`](heom/convergence_10K/REPORT.md).
+
+## Correlated HEOM preparation
+
+```sh
+python heom_nonmarkovian.py --nx 8 --states 6 --depth 2 --matsubara 1 \
+  --duration 10 --frames 11 --initial-preparation correlated-projected \
+  --output advanced_models_20261007/correlated_heom/correlated_projected.h5
+```
+
+- Stationary hierarchy residual: `1.4595641e-18`
+- Initial correlated auxiliary norm: `1.0901055`
+- Maximum trace error: `2.2205775e-16`
+- Minimum density eigenvalue: `-3.4189106e-20` (roundoff)
+
+See [`correlated_heom/REPORT.md`](correlated_heom/REPORT.md).
+
+## Exact non-Gaussian spin bath
+
+Four-spin, 300 fs exact propagation:
+
+- Maximum trace error: `4.4433516e-16`
+- Minimum density eigenvalue: `5.5219793e-18`
+- Trace-distance information backflow: `0.049377609`
+- Final product population: `0.54518814`
+
+See [`spin_bath/REPORT.md`](spin_bath/REPORT.md). Positive information backflow
+verifies finite-bath memory; it is not a continuum-bath convergence claim.
+
+## Three-coordinate transfer and PES ingestion
+
+A 20 by 10 by 8 grid propagated for 0.5 fs with maximum norm drift
+`1.2212453e-14` and final product population `3.8554462e-6`. See
+[`transfer_3d/REPORT.md`](transfer_3d/REPORT.md). Regression also round-trips an analytic surface through
+the unit-annotated external PES schema and reproduces all three diabatic surfaces to
+`2e-15` hartree.

@@ -102,11 +102,18 @@ python heom_convergence.py --depth 3 --matsubara 2 --tolerance 0.02
 ```
 
 HEOM is systematically converged in hierarchy depth, bath-pole count, and retained
-system states. Its declared physics is a linearly coupled harmonic Gaussian bath and
-a factorized initial preparation. Arbitrary non-Gaussian environments or direct
-real-time influence-functional path integration remain different model families.
-Low temperatures require more Matsubara poles; the supplied 10 K validation uses
-eight poles and checks a ninth.
+system states. `--initial-preparation correlated-equilibrium` solves the stationary
+truncated hierarchy with unit trace; `correlated-projected` applies the system
+preparation operator to every equilibrium ADO. These retain equilibrium system-bath
+correlations and provide the real-time stationary counterpart of imaginary-time HEOM
+initialization. Low temperatures require more Matsubara poles; the supplied 10 K
+validation uses eight poles and checks a ninth.
+
+`spin_bath_non_gaussian.py` covers a distinct non-Gaussian model family by exact
+diagonalization of a reactant/product two-state system coupled to a finite thermal
+spin bath. It writes the full reduced density matrix, populations, trace distance,
+and information-backflow measure. Cost grows exponentially, so the implementation
+is deliberately limited to ten bath spins.
 
 ## Multidimensional transfer
 
@@ -114,6 +121,15 @@ eight poles and checks a ninth.
 split-operator solver. Coordinate one is H transfer; coordinate two is a coupled
 promoting/bath mode with independent mass, shifted wells, and reaction-path coupling.
 It writes physical-unit 2D densities, surfaces, populations, and time to HDF5.
+
+`multidimensional_transfer_3d.py` extends this construction to one transfer and two
+promoting coordinates. It accepts either analytic coupled valleys or a validated
+external diabatic PES through `potential_data.py`. The PES schema stores strictly
+increasing x/y/z axes in angstrom and Hermitian V11/V22/V12 surfaces in cm^-1;
+trilinear interpolation and atomic-unit conversion occur at the solver boundary.
+See [`docs/PES_SCHEMA.md`](docs/PES_SCHEMA.md) for the exact dataset contract.
+Electronic-structure surface generation remains external—this repository consumes,
+validates, and propagates first-principles data but is not an electronic-structure code.
 
 ## Automated evidence campaigns
 
