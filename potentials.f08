@@ -66,6 +66,17 @@ CONTAINS
       ELSE
         bath_pot%colored = .FALSE.
       END IF
+    ELSE
+      ! White modulation has stationary marginal N(0,sigma^2) at every sample.
+      CALL randn_gauss(z1, z2)
+      bath_pot%rt(1) = ctrl%bath_pot_sigma*z1
+      IF (bath_pot%coupled) THEN
+        bath_pot%rt(2) = bath_pot%rt(1)
+      ELSE
+        bath_pot%rt(2) = ctrl%bath_pot_sigma*z2
+      END IF
+      IF (.NOT. ctrl%bath_pot_reactant) bath_pot%rt(1) = 0.0_dp
+      IF (.NOT. ctrl%bath_pot_product ) bath_pot%rt(2) = 0.0_dp
     END IF
 
   END SUBROUTINE potentials_bath_init

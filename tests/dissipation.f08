@@ -12,7 +12,7 @@ program regression
   type(SOProp) :: prop
   type(LangevinState) :: bath
   integer :: i,j,mode
-  real(dp) :: p,xi,norm,avg,var,avg2,var2,expected,v11,v22,v12,p1,p2
+  real(dp) :: p,xi,norm,norm2,avg,var,avg2,var2,expected,v11,v22,v12,p1,p2
   integer, parameter :: samples=12000
   call seed_stream(4321)
   ctrl%k1=0; ctrl%k2=0; ctrl%v12=0
@@ -137,4 +137,18 @@ program regression
      abs(g%k(4)+4.0_dp*acos(-1.0_dp)/5.0_dp)>1.e-14_dp) &
     error stop 'odd FFT grid ordering'
   print *, 'PASS odd-sized FFT grid ordering'
+
+  ctrl%use_absorber=.true.; ctrl%absorber_width=1.0_dp
+  ctrl%absorber_rate=2.0_dp; ctrl%absorber_power=4
+  ctrl%xmin=-4.0_dp; ctrl%xmax=4.0_dp
+  ctrl%x0=-3.7_dp; ctrl%sigma0=0.2_dp; ctrl%p0=0.0_dp
+  call build_grid(g,256,ctrl%xmin,ctrl%xmax)
+  call init_prop(prop,g)
+  call set_gaussian_packet(prop,ctrl)
+  norm=sum(abs(prop%psi1)**2+abs(prop%psi2)**2)*g%dx
+  call apply_absorber(ctrl,prop,0.5_dp)
+  norm2=sum(abs(prop%psi1)**2+abs(prop%psi2)**2)*g%dx
+  if(norm2 >= norm .or. norm2 <= 0.0_dp) error stop 'absorber norm reduction'
+  call destroy_prop(prop)
+  print *, 'PASS smooth edge absorber',norm,norm2
 end program

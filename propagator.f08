@@ -163,7 +163,28 @@ CONTAINS
     CALL bath_kick(ctrl, prop, state, 0.5_dp*dt)
     CALL step_split_na(ctrl, prop, dt, 0.0_dp)
     CALL bath_kick(ctrl, prop, state, 0.5_dp*dt)
+    CALL apply_absorber(ctrl, prop, dt)
   END SUBROUTINE step_langevin
+
+  SUBROUTINE apply_absorber(ctrl, prop, dt)
+    TYPE(SimCtrl), INTENT(IN) :: ctrl
+    TYPE(SOProp), INTENT(INOUT) :: prop
+    REAL(dp), INTENT(IN) :: dt
+    INTEGER :: i
+    REAL(dp) :: edge_distance, scaled, mask
+
+    IF (.NOT. ctrl%use_absorber .OR. ctrl%absorber_rate <= 0.0_dp) RETURN
+    DO i = 1, prop%g%nx
+      edge_distance = MAX(ctrl%xmin + ctrl%absorber_width - prop%g%x(i), &
+                          prop%g%x(i) - (ctrl%xmax - ctrl%absorber_width), 0.0_dp)
+      IF (edge_distance > 0.0_dp) THEN
+        scaled = edge_distance/ctrl%absorber_width
+        mask = EXP(-ctrl%absorber_rate*dt*scaled**ctrl%absorber_power)
+        prop%psi1(i) = mask*prop%psi1(i)
+        prop%psi2(i) = mask*prop%psi2(i)
+      END IF
+    END DO
+  END SUBROUTINE apply_absorber
 
   SUBROUTINE step_split_na(ctrl, prop, dt, xi)
     ! Nonadiabatic split step:

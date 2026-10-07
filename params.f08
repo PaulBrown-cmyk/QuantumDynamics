@@ -41,6 +41,12 @@ MODULE params
      ! Initial wavepacket
      REAL(dp)           :: x0 = -8.0_dp, p0 = 1.2_dp, sigma0 = 1.0_dp
 
+     ! Optional smooth absorbing layers at both periodic-grid edges.
+     LOGICAL            :: use_absorber = .false.
+     REAL(dp)           :: absorber_width = 0.5_dp ! input angstrom
+     REAL(dp)           :: absorber_rate = 1.0_dp  ! input fs^-1
+     INTEGER            :: absorber_power = 4
+
      ! Langevin noise controls
      LOGICAL            :: use_colored = .false.
      CHARACTER(16)      :: kernel      = 'white'     ! 'white' or 'lorentz'
@@ -59,6 +65,7 @@ MODULE params
      ! IO
      CHARACTER(128)     :: out_prefix = 'run'
      LOGICAL            :: hdf5 = .true.
+     LOGICAL            :: write_initial = .true.
      LOGICAL            :: want_coupling=.false.
      LOGICAL            :: use_exponential=.false.
      LOGICAL            :: units_converted=.false.
@@ -71,14 +78,14 @@ CONTAINS
     CHARACTER(*), OPTIONAL, INTENT(IN) :: filename
   
     ! Local mirrors for NAMELIST
-    INTEGER :: nx, nsteps, save_every, ntraj, seed0
+    INTEGER :: nx, nsteps, save_every, ntraj, seed0, absorber_power
     REAL(dp) :: xmin, xmax, dt, temperature_k, mass_amu, gamma
     REAL(dp) :: k1, k2, x1, x2, v1_shift, v2_shift, c4_1, c4_2, v12, sigma
-    REAL(dp) :: x0, p0, sigma0, fwhm
+    REAL(dp) :: x0, p0, sigma0, fwhm, absorber_width, absorber_rate
     INTEGER :: bath_pot_mode
     REAL(dp) :: bath_pot_sigma, bath_pot_fwhm
     LOGICAL :: bath_pot_reactant, bath_pot_product, bath_pot_coupled, bath_pot_colored
-    LOGICAL :: use_colored, hdf5, want_coupling, use_exponential
+    LOGICAL :: use_colored, hdf5, want_coupling, use_exponential, write_initial, use_absorber
     LOGICAL :: damp_reactant, damp_product
     CHARACTER(16)  :: pot_model
     CHARACTER(16)  :: kernel
@@ -87,7 +94,8 @@ CONTAINS
     namelist /qle/ nx, xmin, xmax, dt, nsteps, save_every, ntraj, temperature_k, mass_amu, gamma, &
                    damp_reactant, damp_product, &
                    seed0, pot_model, k1, k2, x1, x2, v1_shift, v2_shift, c4_1, c4_2, &
-                   v12, sigma, x0, p0, sigma0, use_colored, kernel, fwhm, out_prefix, hdf5, &
+                   v12, sigma, x0, p0, sigma0, use_absorber, absorber_width, absorber_rate, &
+                   absorber_power, use_colored, kernel, fwhm, out_prefix, hdf5, write_initial, &
                    bath_pot_mode, bath_pot_sigma, bath_pot_fwhm, bath_pot_reactant, bath_pot_product, &
                    bath_pot_coupled, bath_pot_colored, want_coupling, use_exponential
   
@@ -125,6 +133,10 @@ CONTAINS
     x0         = ctrl%x0
     p0         = ctrl%p0
     sigma0     = ctrl%sigma0
+    use_absorber = ctrl%use_absorber
+    absorber_width = ctrl%absorber_width
+    absorber_rate = ctrl%absorber_rate
+    absorber_power = ctrl%absorber_power
     use_colored= ctrl%use_colored
     kernel     = ctrl%kernel
     fwhm       = ctrl%fwhm
@@ -137,6 +149,7 @@ CONTAINS
     bath_pot_colored  = ctrl%bath_pot_colored
     out_prefix = ctrl%out_prefix
     hdf5       = ctrl%hdf5
+    write_initial = ctrl%write_initial
     want_coupling = ctrl%want_coupling
     use_exponential = ctrl%use_exponential
   
@@ -180,6 +193,10 @@ CONTAINS
     ctrl%x0         = x0
     ctrl%p0         = p0
     ctrl%sigma0     = sigma0
+    ctrl%use_absorber = use_absorber
+    ctrl%absorber_width = absorber_width
+    ctrl%absorber_rate = absorber_rate
+    ctrl%absorber_power = absorber_power
     ctrl%use_colored= use_colored
     ctrl%kernel     = lower_ascii(ADJUSTL(TRIM(kernel)))
     ctrl%fwhm       = fwhm
@@ -192,6 +209,7 @@ CONTAINS
     ctrl%bath_pot_colored  = bath_pot_colored
     ctrl%out_prefix = out_prefix
     ctrl%hdf5       = hdf5
+    ctrl%write_initial = write_initial
     ctrl%want_coupling  = want_coupling 
     ctrl%use_exponential  = use_exponential
 
@@ -214,6 +232,13 @@ CONTAINS
     IF (ctrl%mass_amu <= 0.0_dp) ERROR STOP 'mass_amu must be positive'
     IF (ctrl%gamma < 0.0_dp) ERROR STOP 'gamma must be nonnegative'
     IF (ctrl%sigma0 <= 0.0_dp) ERROR STOP 'sigma0 must be positive'
+    IF (ctrl%use_absorber) THEN
+      IF (ctrl%absorber_width <= 0.0_dp) ERROR STOP 'absorber_width must be positive'
+      IF (ctrl%absorber_width >= 0.5_dp*(ctrl%xmax-ctrl%xmin)) &
+        ERROR STOP 'absorber_width must be less than half the box width'
+      IF (ctrl%absorber_rate <= 0.0_dp) ERROR STOP 'absorber_rate must be positive'
+      IF (ctrl%absorber_power < 1) ERROR STOP 'absorber_power must be at least 1'
+    END IF
     IF (ctrl%want_coupling .AND. ABS(ctrl%v12) > 0.0_dp .AND. ctrl%sigma <= 0.0_dp) &
       ERROR STOP 'coupling sigma must be positive'
     IF (ctrl%k1 < 0.0_dp .OR. ctrl%k2 < 0.0_dp) &
@@ -252,12 +277,14 @@ CONTAINS
     ctrl%x0   = ctrl%x0   * ANGSTROM_TO_AU
     ctrl%sigma = ctrl%sigma * ANGSTROM_TO_AU
     ctrl%sigma0 = ctrl%sigma0 * ANGSTROM_TO_AU
+    ctrl%absorber_width = ctrl%absorber_width * ANGSTROM_TO_AU
 
     ! Time / rates: fs -> atomic time, fs^-1 -> atomic inverse time
     ctrl%dt    = ctrl%dt * FS_TO_AU
     ctrl%gamma = ctrl%gamma / FS_TO_AU
     ctrl%fwhm  = ctrl%fwhm / FS_TO_AU
     ctrl%bath_pot_fwhm = ctrl%bath_pot_fwhm / FS_TO_AU
+    ctrl%absorber_rate = ctrl%absorber_rate / FS_TO_AU
 
     ! Frequencies / energies: cm^-1 -> Hartree
     ctrl%v1_shift  = ctrl%v1_shift * CMINV_TO_AU

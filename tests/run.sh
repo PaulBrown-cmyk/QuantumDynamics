@@ -41,11 +41,14 @@ if [ -n "${QLE_EXE:-}" ] && [ -x "$QLE_EXE" ]; then
   (
     cd ascii-smoke
     OMPI_MCA_btl=self OMP_NUM_THREADS=2 "$QLE_EXE" "$root/tests/INPUT.smoke.nml" > run.log
+    test -s smoke.traj000001.rank0.s000000.dat
     test -s smoke.traj000001.rank0.s000001.dat
     test -s smoke.traj000001.rank0.s000002.dat
+    test -s smoke.traj000001.rank0.s000000.pes.dat
     test -s smoke.traj000001.rank0.s000001.pes.dat
     test -s smoke.traj000001.rank0.s000002.pes.dat
     test -s smoke.traj000001.rank0.obs.dat
+    grep -q '# t(fs) =     0.000000' smoke.traj000001.rank0.s000000.dat
     grep -q '# t(fs) =     0.010000' smoke.traj000001.rank0.s000001.dat
     grep -q '# x(Ang)' smoke.traj000001.rank0.s000001.pes.dat
     if grep -Eiq 'nan|inf' ./*.dat; then
@@ -85,6 +88,12 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
     cd hdf5-smoke
     OMPI_MCA_btl=self OMP_NUM_THREADS=2 "$QLE_EXE" > run.log
     "$hdf5_python" "$root/tests/check_hdf5.py" smoke_h5.traj000001.rank0.h5
+    "$hdf5_python" "$root/analyze_ensemble.py" smoke_h5.traj000001.rank0.h5 \
+      --output aggregate --skip-fit --no-plot
+    "$hdf5_python" "$root/tests/check_ensemble_fit.py"
+    test -s aggregate.csv
+    test -s aggregate.md
+    grep -q '^0.0,' aggregate.csv
   )
 else
   echo 'SKIP HDF5 output check (HDF5 build or h5py unavailable)'

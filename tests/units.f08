@@ -28,6 +28,10 @@ program unit_conversions
   ctrl%x0 = -0.7_dp
   ctrl%p0 = 2.5_dp
   ctrl%sigma0 = 0.2_dp
+  ctrl%use_absorber = .true.
+  ctrl%absorber_width = 0.4_dp
+  ctrl%absorber_rate = 0.6_dp
+  ctrl%absorber_power = 4
   ctrl%bath_pot_mode = 1
   ctrl%bath_pot_sigma = 0.3_dp
   ctrl%bath_pot_fwhm = 2.0_dp
@@ -43,6 +47,8 @@ program unit_conversions
   call check('mass input', ctrl%mass/AMU_TO_AU, 1.00784_dp)
   call check('temperature input', 1.0_dp/(ctrl%beta*BOLTZMANN_AU_PER_K), 300.0_dp)
   call check('wave number input', ctrl%p0*ANGSTROM_TO_AU, 2.5_dp)
+  call check('absorber width input', ctrl%absorber_width*AU_TO_ANGSTROM, 0.4_dp)
+  call check('absorber rate input', ctrl%absorber_rate*FS_TO_AU, 0.6_dp)
   call check('force constant input', &
     ctrl%k1/Cminv_to_au*ANGSTROM_TO_AU**2, 2200.0_dp)
   call check('quartic input', ctrl%c4_1/CMINV_TO_AU*ANGSTROM_TO_AU**4, 12.0_dp)

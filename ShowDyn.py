@@ -229,6 +229,8 @@ def _guess_t_path(f: h5py.File, step_group: Optional[str] = None) -> Optional[st
     p = _try_paths(f, candidates)
     if p:
         return p
+    if step_group:
+        return None
     return _find_by_predicate(
         f,
         lambda path, ds: ds.size == 1 and np.issubdtype(ds.dtype, np.floating)
@@ -254,6 +256,8 @@ def _guess_psi_path(f: h5py.File, step_group: Optional[str] = None) -> Optional[
     p = _try_paths(f, candidates)
     if p:
         return p
+    if step_group:
+        return None
 
     # otherwise: dataset whose leaf is psi/psi1 and is complex-like
     def pred(path, ds):
@@ -280,6 +284,8 @@ def _guess_psi1_path(f: h5py.File, step_group: Optional[str] = None) -> Optional
     p = _try_paths(f, candidates)
     if p:
         return p
+    if step_group:
+        return None
     return _find_by_predicate(
         f,
         lambda path, ds: path.lower().split("/")[-1] in ("psi1", "psi_1")
@@ -296,6 +302,8 @@ def _guess_psi2_path(f: h5py.File, step_group: Optional[str] = None) -> Optional
     p = _try_paths(f, candidates)
     if p:
         return p
+    if step_group:
+        return None
     return _find_by_predicate(
         f,
         lambda path, ds: path.lower().split("/")[-1] in ("psi2", "psi_2")
@@ -320,6 +328,8 @@ def _guess_V_path(f: h5py.File, step_group: Optional[str] = None) -> Optional[st
     p = _try_paths(f, candidates)
     if p:
         return p
+    if step_group:
+        return None
     return _find_by_predicate(
         f,
         lambda path, ds: np.issubdtype(ds.dtype, np.floating)
@@ -675,6 +685,8 @@ def _pot_at_step(p: Optional[np.ndarray], it: int) -> Optional[np.ndarray]:
     if p.ndim == 1:
         return p
     if p.ndim == 2:
+        if p.shape[0] == 1:
+            return p[0]
         return p[it]
     return None
 

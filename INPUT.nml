@@ -58,11 +58,18 @@
   p0      =  2.83459,
   sigma0  =  0.529177,
 
+  ! Optional smooth absorbing edge layers (disabled here).
+  use_absorber   = .false.,
+  absorber_width = 0.5,  ! angstrom
+  absorber_rate  = 1.0,  ! fs^-1
+  absorber_power = 4,
+
   ! Coupling and IO
   want_coupling   = .true.,
   use_exponential = .false.,
   out_prefix      = 'hat_splitop',
   hdf5            = .true.,
+  write_initial    = .true.,
 
   ! -------------------------------------------------------------------------
   ! Stochastic potential modulation: bath acts directly on the diabatic wells

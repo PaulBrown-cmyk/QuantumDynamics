@@ -14,10 +14,12 @@ They exercise the production bath, split propagator, and writers:
   variance mass/beta (12,000 independent trajectories, 0.025 absolute tolerance).
 * Colored stochastic-potential initialization: stationary mean and variance.
 * Odd-sized FFT grids: correct positive/negative frequency ordering.
+* Smooth edge absorber: positive, monotone norm removal near box boundary.
 * Physical-unit conversion for length, time, energy, rate, mass, temperature,
   wave number, force constants, and every potential-bath amplitude mode.
-* CLI help safety, explicit input path, dynamic ASCII PES output, and HDF5 smoke
-  output when HDF5 and Python h5py are available.
+* Exact t=0 output, CLI help safety, explicit input path, dynamic ASCII PES, and
+  compact static-PES HDF5 output when HDF5 and Python h5py are available.
+* Bounded biexponential recovery for a synthetic two-timescale population.
 
 The implemented model is a classical-FDT centroid thermostat. It preserves each
 pure-state trajectory's norm. With both damping switches enabled, one shared kick
@@ -43,20 +45,25 @@ Build fixes included: .f08 compiler language selection, serial module ordering,
 module-scoped FFT thread wrappers, and dedicated aligned FFTW plans for
 both wavefunction components. HDF5-off build: make USE_HDF5=0.
 
-Validation on 2026-10-04
+Validation on 2026-10-07
 ------------------------
 GNU Fortran 16.2.0, FFTW 3.3.11, OpenMPI 5.0.10, and HDF5 2.2.0
 (macOS/Apple Silicon). Full HDF5 and HDF5-disabled executables compiled and
 linked. Strict `-Wall -Wextra -Wimplicit-interface` build completed without
-warnings. ASCII and HDF5 physical-unit round trips passed. Checked results:
+warnings. ASCII and HDF5 physical-unit round trips, exact initial frames,
+compact static PES output, absorber behavior, and bounded rate recovery passed.
+Checked results:
 
     gamma=0 norm              1.0000000000000029
     white mean momentum       0.1353352832366140 (target 0.1353352832366127)
     colored mean momentum     0.0695923160846613 (target 0.0696104692927771)
-    white ensemble mean/var   0.0019632990 / 0.4975866070
-    colored ensemble mean/var 0.0067755961 / 0.5104215296
+    white ensemble mean/var   0.0001214175 / 0.5111287945
+    colored ensemble mean/var -0.0014838410 / 0.4929042939
+    potential OU mean/var     -0.0013278089 / 3.9906906883
     coupling switches         pass
     quartic/shift separation  pass
+    edge absorber             pass
+    synthetic two-rate fit    pass
     ASCII/HDF5 output units   pass
 
 Audit: the former main call omitted pbar, suppressing both white friction and

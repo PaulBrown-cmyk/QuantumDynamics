@@ -17,8 +17,8 @@ def as_complex(array):
 
 
 with h5py.File(sys.argv[1], "r") as handle:
-    assert sorted(handle) == ["step_000001", "step_000002"]
-    for index, name in enumerate(sorted(handle), start=1):
+    assert sorted(handle) == ["step_000000", "step_000001", "step_000002"]
+    for index, name in enumerate(sorted(handle)):
         group = handle[name]
         x = np.asarray(group["x"])
         psi1 = as_complex(group["psi1"])
@@ -30,6 +30,9 @@ with h5py.File(sys.argv[1], "r") as handle:
         norm = np.sum(np.abs(psi1) ** 2 + np.abs(psi2) ** 2) * (x[1] - x[0])
         assert np.isclose(norm, 1.0, rtol=0.0, atol=2.0e-11)
         for dataset in ("V11", "V22", "V12", "V_lower", "V_upper"):
-            assert np.all(np.isfinite(group[dataset][...]))
+            if index == 0:
+                assert np.all(np.isfinite(group[dataset][...]))
+            else:
+                assert dataset not in group
 
 print("PASS HDF5 physical-unit output")

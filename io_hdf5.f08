@@ -50,32 +50,34 @@ CONTAINS
     END IF
   END SUBROUTINE x_expect_1d
 
-  SUBROUTINE write_snapshot(ctrl, g, t, psi1, psi2, step, rank)
+  SUBROUTINE write_snapshot(ctrl, g, t, psi1, psi2, step, rank, new_run)
     TYPE(SimCtrl),  INTENT(IN) :: ctrl
     TYPE(RealGrid), INTENT(IN) :: g
     REAL(dp),       INTENT(IN) :: t
     COMPLEX(dp),    INTENT(IN) :: psi1(:), psi2(:)
     INTEGER,        INTENT(IN) :: step, rank
+    LOGICAL,        INTENT(IN) :: new_run
     CHARACTER(256) :: fname
 
     WRITE(fname, '(a, ".rank",i0, ".h5")') TRIM(ctrl%out_prefix), rank
 #ifdef USE_HDF5
     IF (ctrl%hdf5) THEN
-      CALL h5_write(ctrl, fname, g, t, psi1, psi2, step)
+      CALL h5_write(ctrl, fname, g, t, psi1, psi2, step, new_run)
     ELSE
-      CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank)
+      CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank, new_run)
     END IF
 #else
-    CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank)
+    CALL ascii_write(ctrl, g, t, psi1, psi2, step, rank, new_run)
 #endif
   END SUBROUTINE write_snapshot
 
-  SUBROUTINE ascii_write(ctrl, g, t, psi1, psi2, step, rank)
+  SUBROUTINE ascii_write(ctrl, g, t, psi1, psi2, step, rank, new_run)
     TYPE(SimCtrl),  INTENT(IN) :: ctrl
     TYPE(RealGrid), INTENT(IN) :: g
     REAL(dp),       INTENT(IN) :: t
     COMPLEX(dp),    INTENT(IN) :: psi1(:), psi2(:)
     INTEGER,        INTENT(IN) :: step, rank
+    LOGICAL,        INTENT(IN) :: new_run
     INTEGER :: i, iu, iu_obs
     CHARACTER(256) :: fname
     CHARACTER(256) :: fobs
@@ -89,7 +91,7 @@ CONTAINS
     CALL x_expect_1d(g%x, g%dx, psi1, pop1, xavg1)
     CALL x_expect_1d(g%x, g%dx, psi2, pop2, xavg2)
     WRITE(fobs, '(a, ".rank",i0, ".obs.dat")') TRIM(ctrl%out_prefix), rank
-    IF (step == 1) THEN
+    IF (new_run) THEN
       OPEN(newunit=iu_obs, FILE=fobs, ACTION='write', STATUS='replace')
       WRITE(iu_obs,'(a)') '# step   t(fs)    xavg1(Ang)   xavg2(Ang)   pop1        pop2'
     ELSE
@@ -104,7 +106,7 @@ CONTAINS
     IF (ctrl%bath_pot_mode /= 0 .AND. ctrl%bath_pot_sigma > 0.0_dp .AND. &
         (ctrl%bath_pot_reactant .OR. ctrl%bath_pot_product)) THEN
       CALL ascii_write_pes(ctrl, g, rank, step)
-    ELSE IF (step == 1) THEN
+    ELSE IF (new_run) THEN
       CALL ascii_write_pes(ctrl, g, rank)
     END IF
     DO i = 1, g%nx
@@ -149,19 +151,21 @@ END SUBROUTINE ascii_write_pes
 
 
 #ifdef USE_HDF5
-  SUBROUTINE h5_write(ctrl, fname, g, t, psi1, psi2, step)
+  SUBROUTINE h5_write(ctrl, fname, g, t, psi1, psi2, step, new_run)
     TYPE(SimCtrl),  INTENT(IN) :: ctrl
     CHARACTER(*),   INTENT(IN) :: fname
     TYPE(RealGrid), INTENT(IN) :: g
     REAL(dp),       INTENT(IN) :: t
     COMPLEX(dp),    INTENT(IN) :: psi1(:), psi2(:)
     INTEGER,        INTENT(IN) :: step
+    LOGICAL,        INTENT(IN) :: new_run
 
     INTEGER(hid_t) :: f, gid
     INTEGER :: ierr
     CHARACTER(64) :: gname
 
     LOGICAL :: exists
+    LOGICAL :: write_pes
 
 
     REAL(dp), ALLOCATABLE :: v11(:), v22(:), v12(:), v_lower(:), v_upper(:)
@@ -182,7 +186,7 @@ END SUBROUTINE ascii_write_pes
 
     ! If this is the first step of a run, start a fresh file to avoid
     ! collisions with previous runs that used the same filename.
-    IF (step == 1) THEN
+    IF (new_run) THEN
     CALL h5fcreate_f(fname, H5F_ACC_TRUNC_F, f, ierr)
     ELSE
       CALL h5fopen_f(fname, H5F_ACC_RDWR_F, f, ierr)
@@ -218,16 +222,20 @@ END SUBROUTINE ascii_write_pes
 !   Vdiab(2,nx)       : row 1=V11, row 2=V22
 !   Vadiab(2,nx)      : row 1=V_lower, row 2=V_upper
 !
+    write_pes = new_run .OR. (ctrl%bath_pot_mode /= 0 .AND. ctrl%bath_pot_sigma > 0.0_dp .AND. &
+                              (ctrl%bath_pot_reactant .OR. ctrl%bath_pot_product))
     nx = g%nx
-    ALLOCATE(v11(nx), v22(nx), v12(nx), v_lower(nx), v_upper(nx))
-    ALLOCATE(vdiab(2,nx), vadiab(2,nx))
+    IF (write_pes) THEN
+      ALLOCATE(v11(nx), v22(nx), v12(nx), v_lower(nx), v_upper(nx))
+      ALLOCATE(vdiab(2,nx), vadiab(2,nx))
 
-    CALL pes_on_grid(ctrl, g%x, v11, v22, v12, v_lower, v_upper)
+      CALL pes_on_grid(ctrl, g%x, v11, v22, v12, v_lower, v_upper)
 
-    vdiab(1,:)  = v11
-    vdiab(2,:)  = v22
-    vadiab(1,:) = v_lower
-    vadiab(2,:) = v_upper
+      vdiab(1,:)  = v11
+      vdiab(2,:)  = v22
+      vadiab(1,:) = v_lower
+      vadiab(2,:) = v_upper
+    END IF
 
     ! ----------------------------------------------------------------------
     CALL write_1d(gid, 'x', g%x * AU_TO_ANGSTROM)
@@ -247,15 +255,16 @@ END SUBROUTINE ascii_write_pes
     CALL write_scalar(gid, 'pop1', pop1)
     CALL write_scalar(gid, 'pop2', pop2)
 
-    CALL write_1d(gid, 'V11', v11 * AU_TO_CMINV)
-    CALL write_1d(gid, 'V22', v22 * AU_TO_CMINV)
-    CALL write_1d(gid, 'V12', v12 * AU_TO_CMINV)
-    CALL write_1d(gid, 'V_lower', v_lower * AU_TO_CMINV)
-    CALL write_1d(gid, 'V_upper', v_upper * AU_TO_CMINV)
-    CALL write_2d(gid, 'Vdiab', vdiab * AU_TO_CMINV)
-    CALL write_2d(gid, 'Vadiab', vadiab * AU_TO_CMINV)
-
-    DEALLOCATE(v11, v22, v12, v_lower, v_upper, vdiab, vadiab)
+    IF (write_pes) THEN
+      CALL write_1d(gid, 'V11', v11 * AU_TO_CMINV)
+      CALL write_1d(gid, 'V22', v22 * AU_TO_CMINV)
+      CALL write_1d(gid, 'V12', v12 * AU_TO_CMINV)
+      CALL write_1d(gid, 'V_lower', v_lower * AU_TO_CMINV)
+      CALL write_1d(gid, 'V_upper', v_upper * AU_TO_CMINV)
+      CALL write_2d(gid, 'Vdiab', vdiab * AU_TO_CMINV)
+      CALL write_2d(gid, 'Vadiab', vadiab * AU_TO_CMINV)
+      DEALLOCATE(v11, v22, v12, v_lower, v_upper, vdiab, vadiab)
+    END IF
 
     CALL h5gclose_f(gid, ierr)
     CALL require_h5(ierr, 'close group', TRIM(gname))

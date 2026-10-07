@@ -94,13 +94,17 @@ PROGRAM qle_1d
 
     t = 0.0_dp
     isave = 0
+    IF (ctrlT%write_initial) THEN
+      CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank, .TRUE.)
+    END IF
 
     DO tstep = 1, ctrlT%nsteps
       CALL step_langevin(ctrlT, prop, L, ctrlT%dt)
       t = t + ctrlT%dt
       IF (MOD(tstep, ctrlT%save_every) == 0) THEN
         isave = isave + 1
-        CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank)
+        CALL write_snapshot(ctrlT, g, t, prop%psi1, prop%psi2, isave, rank, &
+                            isave == 1 .AND. .NOT. ctrlT%write_initial)
       END IF
     END DO
 
