@@ -25,7 +25,7 @@
 
 \title{QuantumDynamics Framework and Capability Notes}
 \author{Paul A. Brown}
-\date{October 7, 2026}
+\date{October 8, 2026}
 
 \begin{document}
 \maketitle
@@ -842,6 +842,71 @@ Wigner phase-space diagnostics & \statusdone & State-resolved and electronic-sta
 Hamiltonian, bath model, convergence tolerance, and controls. It is not
 model-independent experimental proof.
 
+\section{Future development roadmap}
+
+The following extensions are not current capabilities. The first four are the
+preferred starting candidates because they strengthen quantitative rates and
+mechanism tests while preserving the present model architecture.
+
+\begin{enumerate}
+  \item \textbf{Reactive-flux rate theory (near-term priority).} Evaluate
+        state-resolved probability current at configurable dividing surfaces,
+        flux--side and flux--flux correlations, plateau rates, recrossing, and
+        absorber-resolved outgoing yield. Continuity and integrated-flux tests
+        would replace population-curve fitting as the primary rate estimator.
+  \item \textbf{Energy-resolved transmission (near-term priority).} Fourier
+        transform windowed outgoing flux or wavepacket correlations to obtain
+        transmission probabilities, cumulative reaction probability, resonance
+        energies, and tunneling windows.
+  \item \textbf{Thermal initial states (near-term priority).} Add canonical
+        eigenstate mixtures, stochastic thermal wavepackets, and density-matrix
+        initialization with thermal trace-error and limiting-case tests.
+  \item \textbf{Automated H/D/T campaigns (near-term priority).} Generate
+        mass-matched controls and bootstrap kinetic isotope effects while testing
+        grid, time-step, duration, ensemble-size, and classical-contamination
+        sensitivity.
+  \item \textbf{Phase-space observables.} Add integrated Wigner negativity,
+        phase-space currents, conditional momentum, coherence lifetimes, and
+        positive Husimi-$Q$ visualization.
+  \item \textbf{Quantum-jump trajectories.} Unravel Davies/Lindblad evolution
+        and verify ensemble agreement with density-matrix dynamics.
+  \item \textbf{Nonsecular Redfield dynamics.} Retain near-degenerate
+        population--coherence coupling, with explicit positivity diagnostics and
+        comparison against Davies and HEOM results.
+  \item \textbf{Structured spectral densities.} Add multiple Drude poles,
+        underdamped Brownian modes, and unit-checked tabulated spectra.
+  \item \textbf{Time-dependent driving.} Add pulsed and periodic bias or coupling
+        modulation for pump--probe, Floquet-assisted, and coherent-control studies.
+  \item \textbf{Richer diabatic Hamiltonians.} Add non-Condon coupling, Morse and
+        multi-barrier surfaces, asymmetric effective masses, and three or more
+        coupled electronic basis states.
+  \item \textbf{Proton-coupled electron transfer.} Couple proton motion to an
+        explicit donor--acceptor or solvent coordinate and electronic-state manifold.
+  \item \textbf{Conical intersections and geometric phase.} Extend complex
+        multidimensional couplings to seam crossing, branching, and Berry-phase tests.
+  \item \textbf{Alternative propagators.} Add Chebyshev, Krylov, DVR, and
+        higher-order split methods as independent accuracy benchmarks.
+  \item \textbf{Uncertainty quantification.} Add global sensitivity, parameter
+        ensembles, bootstrap or Bayesian intervals, and surrogate-assisted fitting.
+  \item \textbf{Embedded provenance.} Store source revision, compiler and
+        dependency versions, build flags, inputs, seeds, convergence evidence, and
+        visualization metadata in HDF5 output.
+\end{enumerate}
+
+Here an \emph{electronic state} means one basis channel in the coupled nuclear
+Hamiltonian. The present one-dimensional wavefunction has two nuclear components
+and propagates over a $2\times2$ diabatic matrix formed by $V_{11}$, $V_{22}$, and
+$V_{12}$. A multistate extension would propagate more nuclear components over an
+$N\times N$ potential/coupling matrix. Those matrix elements may remain analytic
+model functions, or they may be generated externally by DFT, multireference,
+coupled-cluster, or other electronic-structure methods and imported through the
+unit-checked PES interface. Reliable first-principles use additionally requires
+state tracking, a consistent electronic phase/gauge, diabatization, interpolation,
+and uncertainty metadata. This package does not itself perform SCF, DFT, correlated
+electronic structure, or on-the-fly force calculations. Offline surface/coupling
+import is therefore the natural first integration step; on-the-fly nonadiabatic
+dynamics would be a substantially larger framework.
+
 \section{Recommended production protocol}
 
 \begin{enumerate}
@@ -877,12 +942,14 @@ python multidimensional_transfer_3d.py --output transfer_3d.h5
 python spin_bath_non_gaussian.py --output spin_bath.h5
 python convergence_campaign.py INPUT.nml --executable ./qle_1d
 python mechanism_attribution.py INPUT.nml --executable ./qle_1d
-python ShowDyn.py run.traj000001.rank0.h5 --wigner --animate --save-animation wigner.gif
+python ShowDyn.py run.traj000001.rank0.h5 --wigner --animate --save-animation wigner.mp4
 \end{verbatim}
 \endgroup
 
 {\small HDF5 may be disabled with \code{make USE_HDF5=0}. FFTW, MPI, OpenMP, and
 HDF5 prefixes remain configurable through the build environment. True single-file
-MPI-IO uses \code{USE_PARALLEL_HDF5=1} with a Parallel-HDF5 installation.}
+MPI-IO uses \code{USE_PARALLEL_HDF5=1} with a Parallel-HDF5 installation.
+MP4, M4V, and MOV animations use H.264/yuv420p with fast-start metadata for
+QuickTime compatibility when FFmpeg with libx264 is available.}
 
 \end{document}
