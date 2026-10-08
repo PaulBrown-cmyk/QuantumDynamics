@@ -21,7 +21,8 @@ They exercise the production bath, split propagator, and writers:
   compact static-PES HDF5 output when HDF5 and Python h5py are available.
 * Bounded biexponential recovery for a synthetic two-timescale population.
 * Wigner-transform position/momentum marginals, grid resampling, quantum
-  negativity, and end-to-end density/PES phase-space rendering.
+  negativity, end-to-end density/PES phase-space rendering, and optional
+  QuickTime-compatible H.264/yuv420p movie encoding when FFmpeg is available.
 * Bitwise-identical checkpoint/restart with colored momentum and potential baths.
 * Two-rank Parallel-HDF5 MPI-IO layout, units, finite values, and normalization.
 * Quantum-FDT KMS ratios, Gibbs stationarity, density-matrix trace, Hermiticity,

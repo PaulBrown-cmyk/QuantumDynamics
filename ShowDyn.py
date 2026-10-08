@@ -829,6 +829,28 @@ def _selected_population_bound(d: TrajData, state: str) -> float:
     return max(float(np.max(_trapezoid(rho, d.x, axis=1))), np.finfo(float).eps)
 
 
+def _save_animation_quicktime(animation, path: str, fps: int, dpi: int) -> None:
+    """Save GIF or video, forcing QuickTime-compatible H.264 when appropriate."""
+    suffix = path.lower().rsplit(".", 1)[-1] if "." in path else ""
+    if suffix == "gif":
+        animation.save(path, writer="pillow", fps=fps, dpi=dpi)
+        return
+    if suffix in ("mp4", "m4v", "mov"):
+        from matplotlib.animation import FFMpegWriter
+
+        writer = FFMpegWriter(
+            fps=fps,
+            codec="libx264",
+            extra_args=[
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+            ],
+        )
+        animation.save(path, writer=writer, dpi=dpi)
+        return
+    animation.save(path, fps=fps, dpi=dpi)
+
+
 def _draw_density_and_pes(ax, d: TrajData, it: int):
     """Draw density and potential curves; return mutable line artists."""
     x, rho = _x_rho_view(d)
@@ -965,11 +987,7 @@ def animate_phase_space(
 
     animation = FuncAnimation(fig, update, frames=indices.size, interval=1000.0 / fps, blit=False)
     if save:
-        suffix = save.lower().rsplit(".", 1)[-1] if "." in save else ""
-        if suffix == "gif":
-            animation.save(save, writer="pillow", fps=fps, dpi=dpi)
-        else:
-            animation.save(save, fps=fps, dpi=dpi)
+        _save_animation_quicktime(animation, save, fps=fps, dpi=dpi)
         plt.close(fig)
     else:
         plt.show()
@@ -1135,11 +1153,7 @@ def animate(
     ani = FuncAnimation(fig, update, frames=len(idxs), init_func=init,
                         interval=1000.0 / fps, blit=True)
     if save:
-        suffix = save.lower().rsplit(".", 1)[-1] if "." in save else ""
-        if suffix == "gif":
-            ani.save(save, writer="pillow", fps=fps, dpi=dpi)
-        else:
-            ani.save(save, fps=fps, dpi=dpi)
+        _save_animation_quicktime(ani, save, fps=fps, dpi=dpi)
         plt.close(fig)
     else:
         plt.show()

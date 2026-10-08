@@ -99,6 +99,13 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
       --no-usetex --snapshot 1 --wigner --wigner-points 32 \
       --save-figure wigner-snapshot.png
     test -s wigner-snapshot.png
+    if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+      MPLBACKEND=Agg "$hdf5_python" "$root/ShowDyn.py" smoke_h5.traj000001.rank0.h5 \
+        --no-usetex --animate --save-animation quicktime-smoke.mp4 --fps 2 --dpi 40
+      test "$(ffprobe -v error -select_streams v:0 \
+        -show_entries stream=codec_name,pix_fmt -of csv=p=0 quicktime-smoke.mp4)" = \
+        "h264,yuv420p"
+    fi
     if "$hdf5_python" -c 'import scipy' >/dev/null 2>&1; then
       "$hdf5_python" "$root/tests/test_advanced.py"
       "$hdf5_python" "$root/tests/test_heom.py"

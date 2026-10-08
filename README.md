@@ -89,12 +89,16 @@ python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
 # Animated density/PES and Wigner phase space
 python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
   --wigner --animate --every 5 --pmax 30 \
-  --save-animation wigner.gif --fps 12
+  --save-animation wigner.mp4 --fps 20
 
 # Density and potential-surface movie without phase space
 python ShowDyn.py run.traj000001.rank0.h5 --no-usetex \
-  --animate --every 5 --save-animation density_pes.gif --fps 12
+  --animate --every 5 --save-animation density_pes.mp4 --fps 20
 ```
+
+MP4, M4V, and MOV output uses H.264 (`libx264`), 8-bit `yuv420p`, and a
+fast-start index for QuickTime compatibility. This requires `ffmpeg`. GIF output
+uses Pillow and remains available by choosing a `.gif` filename.
 
 Negative Wigner values diagnose nonclassical coherence; Wigner function is a
 quasiprobability, not an ordinary probability distribution. Increase
