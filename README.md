@@ -11,13 +11,6 @@ using classical fluctuation-dissipation statistics. `damp_reactant` and
 `damp_product` select which diabatic state receives momentum damping; enabling
 both retains shared-centroid behavior.
 
-Framework equations, controls, verified capabilities, production guidance, and
-remaining limitations are collected in
-[`docs/framework_capabilities.tex`](docs/framework_capabilities.tex) and the
-compiled [`docs/QuantumDynamics_Framework_Notes.pdf`](docs/QuantumDynamics_Framework_Notes.pdf).
-Prioritized next developments are tracked in
-[`docs/FUTURE_WORK.md`](docs/FUTURE_WORK.md).
-
 ## Illustrative results
 
 ![Representative open-system dynamics from the Davies, HEOM, and exact finite spin-bath solvers](docs/figures/open_system_hierarchy.png)
