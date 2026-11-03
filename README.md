@@ -26,8 +26,10 @@ figure demonstrates solver capabilities, not a like-for-like physical benchmark.
 *Product-damped H-transfer trajectory shown as coordinate density over diabatic
 and adiabatic potential surfaces (top) and total nuclear Wigner function (bottom).
 Red/blue phase-space lobes expose positive/negative quantum interference that a
-coordinate-density plot alone cannot show. Animation is illustrative and remains
-conditional on this trajectory's Hamiltonian, bath, and grid.*
+coordinate-density plot alone cannot show. Colorbar stays fixed at
+`[-1/pi, +1/pi]` for every frame, allowing direct comparison through time.
+Animation is illustrative and remains conditional on this trajectory's
+Hamiltonian, bath, and grid.*
 
 Additional illustrated results for multidimensional propagation, biexponential
 kinetics, and controlled mechanism tests appear in the
