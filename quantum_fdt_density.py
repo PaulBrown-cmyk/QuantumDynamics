@@ -90,6 +90,101 @@ def initial_state(model: Model, x_bohr: np.ndarray) -> np.ndarray:
     return state
 
 
+def canonical_populations(energies: np.ndarray, temperature_k: float) -> np.ndarray:
+    """Stable canonical probabilities in the supplied energy eigenbasis."""
+    energies = np.asarray(energies, dtype=float).reshape(-1)
+    if energies.size == 0 or not np.all(np.isfinite(energies)):
+        raise ValueError("energies must be a finite nonempty array")
+    if not np.isfinite(temperature_k) or temperature_k <= 0.0:
+        raise ValueError("temperature must be positive and finite")
+    beta = 1.0 / (KB_HARTREE_PER_K * temperature_k)
+    weights = np.exp(-beta * (energies - np.min(energies)))
+    return weights / np.sum(weights)
+
+
+def thermal_pure_density(
+    energies: np.ndarray,
+    temperature_k: float,
+    samples: int,
+    seed: int,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Estimate canonical density with Boltzmann-filtered random pure states.
+
+    Unnormalized complex Gaussian vectors are filtered by exp(-beta H/2).  Their
+    weighted outer products form an unbiased stochastic trace estimator.  The
+    returned density is represented in the energy eigenbasis.
+    """
+    if samples < 1:
+        raise ValueError("thermal samples must be positive")
+    probabilities = canonical_populations(energies, temperature_k)
+    rng = np.random.default_rng(seed)
+    random_vectors = (
+        rng.standard_normal((samples, probabilities.size))
+        + 1j * rng.standard_normal((samples, probabilities.size))
+    ) / np.sqrt(2.0)
+    filtered = random_vectors * np.sqrt(probabilities)[None, :]
+    norms = np.sum(np.abs(filtered) ** 2, axis=1)
+    if np.any(norms <= 0.0) or not np.all(np.isfinite(norms)):
+        raise RuntimeError("invalid stochastic thermal-vector norm")
+    rho = np.einsum("si,sj->ij", filtered, filtered.conj()) / np.sum(norms)
+    rho = 0.5 * (rho + rho.conj().T)
+    rho /= np.trace(rho).real
+    sample_weights = norms / np.sum(norms)
+    exact = np.diag(probabilities)
+    diagnostics = {
+        "thermal_samples": float(samples),
+        "thermal_effective_sample_size": float(1.0 / np.sum(sample_weights**2)),
+        "thermal_effective_dimension": float(1.0 / np.sum(probabilities**2)),
+        "thermal_trace_estimator_error": float(abs(np.mean(norms) - 1.0)),
+        "thermal_density_frobenius_error": float(np.linalg.norm(rho - exact, ord="fro")),
+        "thermal_population_error": float(
+            np.max(np.abs(np.real(np.diag(rho)) - probabilities))
+        ),
+    }
+    return rho, diagnostics
+
+
+def prepare_initial_density_energy(
+    preparation: str,
+    model: Model,
+    x_bohr: np.ndarray,
+    energies: np.ndarray,
+    eigenvectors: np.ndarray,
+    temperature_k: float,
+    thermal_samples: int = 256,
+    seed: int = 12345,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Build wavepacket, exact Gibbs, or stochastic thermal initial density."""
+    probabilities = canonical_populations(energies, temperature_k)
+    effective_dimension = float(1.0 / np.sum(probabilities**2))
+    if preparation == "wavepacket":
+        state = initial_state(model, x_bohr)
+        state_energy = eigenvectors.conj().T @ state
+        rho = np.outer(state_energy, state_energy.conj())
+        return rho, {
+            "thermal_samples": 0.0,
+            "thermal_effective_sample_size": 0.0,
+            "thermal_effective_dimension": effective_dimension,
+            "thermal_trace_estimator_error": 0.0,
+            "thermal_density_frobenius_error": 0.0,
+            "thermal_population_error": 0.0,
+        }
+    if preparation == "gibbs":
+        return np.diag(probabilities).astype(complex), {
+            "thermal_samples": 0.0,
+            "thermal_effective_sample_size": 0.0,
+            "thermal_effective_dimension": effective_dimension,
+            "thermal_trace_estimator_error": 0.0,
+            "thermal_density_frobenius_error": 0.0,
+            "thermal_population_error": 0.0,
+        }
+    if preparation == "thermal-pure":
+        return thermal_pure_density(
+            energies, temperature_k, samples=thermal_samples, seed=seed
+        )
+    raise ValueError(f"unknown initial preparation: {preparation}")
+
+
 def davies_rate_matrix(
     energies: np.ndarray,
     coupling_energy_basis: np.ndarray,
@@ -141,6 +236,31 @@ def propagate_density(
 ) -> np.ndarray:
     rho0 = np.outer(initial, initial.conj())
     rho0_e = eigenvectors.conj().T @ rho0 @ eigenvectors
+    return propagate_density_energy(
+        energies, rho0_e, generator, escape, dephasing, times_au
+    )
+
+
+def propagate_density_energy(
+    energies: np.ndarray,
+    initial_density_energy: np.ndarray,
+    generator: np.ndarray,
+    escape: np.ndarray,
+    dephasing: np.ndarray,
+    times_au: np.ndarray,
+) -> np.ndarray:
+    """Propagate an arbitrary finite-grid density matrix in energy basis."""
+    rho0_e = np.asarray(initial_density_energy, dtype=complex)
+    expected = (energies.size, energies.size)
+    if rho0_e.shape != expected:
+        raise ValueError(f"initial density shape must be {expected}")
+    if not np.allclose(rho0_e, rho0_e.conj().T, atol=1.0e-12):
+        raise ValueError("initial density must be Hermitian")
+    trace = np.trace(rho0_e)
+    if abs(trace - 1.0) > 1.0e-10:
+        raise ValueError("initial density must have unit trace")
+    if np.linalg.eigvalsh(rho0_e)[0] < -1.0e-10:
+        raise ValueError("initial density must be positive semidefinite")
     populations0 = np.real(np.diag(rho0_e))
     delta = energies[:, None] - energies[None, :]
     damping = 0.5 * (escape[:, None] + escape[None, :]) + dephasing
@@ -162,8 +282,17 @@ def run(args: argparse.Namespace) -> dict[str, float]:
         coupling_cminv=args.coupling,
     )
     x, hamiltonian = build_hamiltonian(model)
-    initial = initial_state(model, x)
     energies, eigenvectors = np.linalg.eigh(hamiltonian)
+    initial_density_energy, thermal_diagnostics = prepare_initial_density_energy(
+        args.initial_preparation,
+        model,
+        x,
+        energies,
+        eigenvectors,
+        args.temperature,
+        args.thermal_samples,
+        args.seed,
+    )
     x_center = 0.5 * (x[0] + x[-1])
     x_scale = max(np.ptp(x), np.finfo(float).eps)
     coordinate = np.diag(np.tile((x - x_center) / x_scale, 2))
@@ -172,8 +301,8 @@ def run(args: argparse.Namespace) -> dict[str, float]:
         energies, coupling_e, args.temperature, args.gamma, args.cutoff
     )
     times_fs = np.linspace(0.0, args.duration, args.frames)
-    rho_energy = propagate_density(
-        energies, eigenvectors, initial, generator, escape, dephasing,
+    rho_energy = propagate_density_energy(
+        energies, initial_density_energy, generator, escape, dephasing,
         times_fs * FS_TO_AU,
     )
 
@@ -196,9 +325,7 @@ def run(args: argparse.Namespace) -> dict[str, float]:
         pop1[index] = np.sum(density1[index]) * dx
         pop2[index] = np.sum(density2[index]) * dx
 
-    beta = 1.0 / (KB_HARTREE_PER_K * args.temperature)
-    gibbs = np.exp(-beta * (energies - energies[0]))
-    gibbs /= gibbs.sum()
+    gibbs = canonical_populations(energies, args.temperature)
     kms_residual = float(np.max(np.abs(generator @ gibbs)))
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -207,10 +334,31 @@ def run(args: argparse.Namespace) -> dict[str, float]:
         handle.attrs["temperature_K"] = args.temperature
         handle.attrs["gamma_fs-1"] = args.gamma
         handle.attrs["cutoff_fs-1"] = args.cutoff
+        handle.attrs["initial_preparation"] = args.initial_preparation
+        handle.attrs["thermal_samples"] = int(thermal_diagnostics["thermal_samples"])
+        handle.attrs["thermal_effective_sample_size"] = thermal_diagnostics[
+            "thermal_effective_sample_size"
+        ]
+        handle.attrs["thermal_effective_dimension"] = thermal_diagnostics[
+            "thermal_effective_dimension"
+        ]
+        handle.attrs["thermal_trace_estimator_error"] = thermal_diagnostics[
+            "thermal_trace_estimator_error"
+        ]
+        handle.attrs["thermal_density_frobenius_error"] = thermal_diagnostics[
+            "thermal_density_frobenius_error"
+        ]
+        handle.attrs["thermal_population_error"] = thermal_diagnostics[
+            "thermal_population_error"
+        ]
+        handle.attrs["thermal_seed"] = args.seed
         handle.attrs["kms_stationarity_residual_au-1"] = kms_residual
         handle.create_dataset("x_angstrom", data=x / ANGSTROM_TO_BOHR)
         handle.create_dataset("time_fs", data=times_fs)
         handle.create_dataset("energy_cminv", data=energies / CMINV_TO_HARTREE)
+        handle.create_dataset("gibbs_population", data=gibbs)
+        handle.create_dataset("initial_rho_energy_real", data=initial_density_energy.real)
+        handle.create_dataset("initial_rho_energy_imag", data=initial_density_energy.imag)
         handle.create_dataset("rho_energy_real", data=rho_energy.real)
         handle.create_dataset("rho_energy_imag", data=rho_energy.imag)
         handle.create_dataset("density1_angstrom-1", data=density1 * ANGSTROM_TO_BOHR)
@@ -223,6 +371,7 @@ def run(args: argparse.Namespace) -> dict[str, float]:
         "min_density_eigenvalue": min_eigenvalue,
         "kms_residual_au-1": kms_residual,
         "final_product_population": float(pop2[-1]),
+        **thermal_diagnostics,
     }
     print("Quantum-FDT density solver complete")
     for key, value in summary.items():
@@ -243,6 +392,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--cutoff", type=float, default=0.2, help="fs^-1")
     result.add_argument("--duration", type=float, default=200.0, help="fs")
     result.add_argument("--frames", type=int, default=101)
+    result.add_argument(
+        "--initial-preparation",
+        choices=("wavepacket", "gibbs", "thermal-pure"),
+        default="wavepacket",
+        help="initial density: localized packet, exact canonical mixture, or stochastic thermal pure states",
+    )
+    result.add_argument("--thermal-samples", type=int, default=256)
+    result.add_argument("--seed", type=int, default=12345)
     return result
 
 

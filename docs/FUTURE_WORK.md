@@ -1,24 +1,30 @@
 # Future development roadmap
 
-Items 1-4 are preferred starting candidates. They strengthen quantitative rate
-and mechanism analysis without replacing the present model architecture.
+Items 1-3 are now implemented. Item 4 is the remaining preferred starting
+candidate. These extensions strengthen quantitative rate and mechanism analysis
+without replacing the present model architecture.
 
 ## Near-term priorities
 
-- [ ] **1. Reactive-flux rate theory.** Compute state-resolved probability current
+- [x] **1. Reactive-flux rate theory.** Computes state-resolved probability current
   at configurable dividing surfaces, flux-side and flux-flux correlations, plateau
-  rates, recrossing diagnostics, and absorber-resolved outgoing yield. Validate
-  current continuity and agreement between integrated flux and population change.
+  rates, recrossing diagnostics, and absorber-resolved outgoing yield. Regression
+  checks cover current continuity and integrated-flux/population agreement.
+  Implemented in `reactive_flux.py`; trajectory correlations are explicitly
+  distinguished from equilibrium Kubo correlations.
 
-- [ ] **2. Energy-resolved transmission.** Fourier transform windowed outgoing
+- [x] **2. Energy-resolved transmission.** Fourier transforms windowed outgoing
   flux or wavepacket correlations to obtain transmission probabilities, cumulative
   reaction probability, resonance energies, and tunneling windows. Test against
-  analytically soluble barriers and energy-integrated flux.
+  the analytic free-particle limit and energy-integrated flux. Output flags
+  non-asymptotic cases when finite-window, recrossing, damping, or driving produces
+  apparent transmission above unity.
 
-- [ ] **3. Thermal initial states.** Support canonical mixtures of stationary
+- [x] **3. Thermal initial states.** Supports canonical mixtures of stationary
   states, stochastic thermal wavepackets, and density-matrix initialization.
   Report effective sample size and thermal trace error; recover zero-temperature
-  and high-temperature limits.
+  and high-temperature limits. Davies output includes exact Gibbs and
+  Boltzmann-filtered stochastic thermal-pure preparations plus convergence metrics.
 
 - [ ] **4. Automated H/D/T isotope campaigns.** Generate mass-matched input sets,
   propagate common physical controls, bootstrap kinetic isotope effects, and test

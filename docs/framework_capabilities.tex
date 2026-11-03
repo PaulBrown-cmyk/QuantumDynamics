@@ -25,7 +25,7 @@
 
 \title{QuantumDynamics Framework and Capability Notes}
 \author{Paul A. Brown}
-\date{October 8, 2026}
+\date{November 3, 2026}
 
 \begin{document}
 \maketitle
@@ -44,7 +44,7 @@ equations, controls, tested behavior, analysis capability, and method boundaries
 \end{abstract}
 
 \begingroup
-\footnotesize
+\scriptsize
 \setlength{\parskip}{0pt}
 \tableofcontents
 \endgroup
@@ -230,7 +230,30 @@ half the sum of outgoing population rates plus zero-frequency pure dephasing.
 This KMS relation enforces quantum detailed balance at every resolved transition
 and makes the Gibbs density matrix stationary. Stored output includes the full
 complex density matrix, physical coordinate densities, populations, energies,
-and a KMS residual. This is the controlled weak-coupling, Markovian quantum-FDT
+and a KMS residual. The solver now supports three explicit preparations. A localized
+wavepacket supplies a rank-one pure state, while the exact finite-basis canonical
+mixture uses
+\begin{equation}
+ \rho_\beta=\frac{e^{-\beta H_S}}{Z},\qquad
+ p_n=\frac{e^{-\beta(E_n-E_0)}}{\sum_m e^{-\beta(E_m-E_0)}}.
+\end{equation}
+Subtracting $E_0$ prevents numerical overflow without changing the normalized
+weights. A stochastic thermal-pure estimator independently samples complex Gaussian
+vectors $|r_s\rangle$, Boltzmann filters them,
+\begin{equation}
+ |\phi_s\rangle=e^{-\beta H_S/2}|r_s\rangle,\qquad
+ \widehat\rho_\beta=
+ \frac{\sum_s|\phi_s\rangle\langle\phi_s|}
+      {\sum_s\langle\phi_s|\phi_s\rangle},
+\end{equation}
+and reports trace-estimator, Frobenius, population, and effective-sample-size
+diagnostics. With sample weights $w_s=\langle\phi_s|\phi_s\rangle$, the latter is
+\begin{equation}
+ N_{\rm eff}=\frac{(\sum_s w_s)^2}{\sum_s w_s^2}.
+\end{equation}
+Both thermal preparations are canonical only within the retained finite-grid energy
+basis; temperature, box, grid, and retained-state convergence remain mandatory.
+This is the controlled weak-coupling, Markovian quantum-FDT
 limit. Strong-coupling non-Markovian quantum baths require HEOM or an equivalent
 influence-functional method and are outside this solver's declared regime. They
 are handled by the separate HEOM path below.
@@ -605,7 +628,11 @@ box are set to zero. Because phase-space output scales quadratically in grid siz
 visualization defaults to a uniform 256-point interpolation that preserves component
 norm; \code{--wigner-points} exposes a convergence control. Saved HDF5 files retain
 the original complex wavefunctions, so an $N_x^2$ Wigner array need not be stored at
-every frame. Red/blue animations combine time-dependent coordinate density and
+every frame. The diverging color normalization is symmetric about zero and fixed for
+the complete animation; by default its limit is the largest selected-state population
+divided by $\pi$, while \code{--wigner-limit} supplies an explicit common limit for
+comparisons between runs. The colorbar ticks and limits therefore do not jump as the
+wavepacket evolves. Red/blue animations combine time-dependent coordinate density and
 potential surfaces with positive/negative Wigner lobes. Negative values are a
 quasiprobability signature of coherent interference, not negative ordinary
 probability. Momentum range, phase-space grid, box, and snapshot cadence must all be
@@ -662,6 +689,59 @@ $N_{\rm traj}^{-1/2}$ for independent finite-variance samples. Passing one axis 
 time around an unconverged baseline can hide compensating errors; production work
 should repeat coupled refinements and quote tolerances on observables used for the
 final claim.
+
+\subsection{Reactive flux and energy-resolved transmission}
+
+\code{reactive_flux.py} evaluates state-resolved probability current from saved
+pure-state trajectories. For diabatic component $i$,
+\begin{equation}
+ j_i(x,t)=\frac{\hbar}{m}\operatorname{Im}
+ \left[\psi_i^*(x,t)\partial_x\psi_i(x,t)\right],\qquad
+ J(x,t)=\sum_i j_i(x,t),
+\end{equation}
+where the spatial derivative is evaluated spectrally and all differentiation is
+performed after converting the stored physical coordinates and wavefunctions to
+atomic units. The reported current is then converted to probability per femtosecond.
+For a dividing surface $x_s$, direct integration of the right-side probability
+$P_>(t)$ provides the continuity check
+\begin{equation}
+ \frac{dP_>}{dt}=J(x_s,t)-J(x_{\rm seam},t)-A_>(t),
+\end{equation}
+where the periodic-box seam current and optional absorber loss $A_>$ are retained
+rather than silently attributed to reaction. Signed current is partitioned as
+$J=J^+-J^-$, giving forward, backward, and net integrated fluxes and the recrossing
+fraction $F^-/F^+$.
+
+An instantaneous phenomenological rate may be formed as
+\begin{equation}
+ k(t)=\frac{J(x_s,t)}{P_R(t)},
+\end{equation}
+but it is accepted as a plateau only when the selected time interval has sufficient
+reactant population, small relative uncertainty, and negligible fitted slope. The
+tool also reports multiple-time-origin trajectory quantities such as
+\begin{align}
+ C_{fs}^{\rm traj}(\tau)&=\left\langle J(t)P_>(t+\tau)\right\rangle_t,\\
+ C_{ff}^{\rm traj}(\tau)&=\left\langle J(t)J(t+\tau)\right\rangle_t.
+\end{align}
+These are useful trajectory correlations, but they are not equilibrium Kubo
+transforms and must not be presented as exact thermal reactive-flux rate theory.
+
+For energy resolution, a windowed temporal transform at incident and product
+surfaces is constructed,
+\begin{equation}
+ \widetilde\psi_i(E,x)=\int dt\,w(t)e^{iEt/\hbar}\psi_i(x,t),
+\end{equation}
+and the associated positive-going spectral current gives
+\begin{equation}
+ T(E)=\frac{j_{\rm out}^{+}(E)}{j_{\rm in}^{+}(E)}.
+\end{equation}
+This ratio is a transmission probability only for a closed, time-independent
+Hamiltonian with asymptotic surfaces, negligible recrossing, adequate spatial and
+temporal separation, and a time window containing the full passage. Driving,
+damping, absorbers between surfaces, or incomplete passage make it an apparent
+spectral ratio instead. Values appreciably above unity trigger a validity warning;
+the code does not clip them into a physical-looking answer. Analytic free-particle
+tests verify the current normalization, flux/side continuity, and unit transmission.
 
 \section{Illustrative results}
 
@@ -761,7 +841,12 @@ Regression coverage includes:
   \item safe command-line help and explicit input paths;
   \item exact $t=0$, ASCII, dynamic-PES, and HDF5 output;
   \item Wigner position and momentum marginals, norm-preserving resampling,
-        negative interference fringes, and end-to-end phase-space rendering;
+        negative interference fringes, fixed symmetric color normalization, and
+        end-to-end phase-space rendering;
+  \item analytic plane-wave current, free Gaussian flux/side continuity,
+        recrossing decomposition, and free-particle unit transmission;
+  \item canonical low- and high-temperature limits, exact Gibbs stationarity,
+        and stochastic thermal-pure convergence diagnostics;
   \item bitwise-identical checkpoint/restart with colored baths;
   \item two-rank single-file Parallel HDF5 MPI-IO output;
   \item KMS rate ratios, Gibbs stationarity, density-matrix trace, Hermiticity,
@@ -827,6 +912,16 @@ Density-matrix decoherence & \statusdone & Complete finite-grid reduced density 
 Multidimensional transfer & \statusdone & Two- and three-coordinate, two-surface FFT propagation implemented and norm tested.\\
 Automated convergence campaign & \statusdone & Time-step, grid, box, absorber, and trajectory-count variants run automatically.\\
 Controlled mechanism assignment & \statusdone & Coupling, energy, isotope, prompt-transfer, rate, and SEM gates implemented.\\
+\bottomrule
+\end{tabular}
+\endgroup
+
+\newpage
+\begingroup\setlength{\parskip}{0pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.41\textwidth}}
+\toprule
+Item & Status & Note\\
+\midrule
 Strong-coupling non-Markovian quantum bath & \statusdone & Scaled Drude--Lorentz HEOM retains finite bath memory and system--bath correlations.\\
 HEOM truncation control & \statusdone & Hierarchy depth, Matsubara poles, and system-state basis are automatically converged.\\
 Non-Gaussian bath & \statusdone & Exact finite spin-bath dynamics implemented; arbitrary macroscopic non-Gaussian baths remain model specific.\\
@@ -834,6 +929,9 @@ Correlated thermal initial state & \statusdone & Sparse stationary HEOM hierarch
 Higher than two nuclear coordinates & \statusdone & Three explicit nuclear coordinates propagate with a norm-tested FFT solver.\\
 First-principles PES interface & \statusdone & Unit-checked HDF5 ingestion and interpolation implemented; electronic-structure generation remains external.\\
 Wigner phase-space diagnostics & \statusdone & State-resolved and electronic-state-traced transforms, static plots, and GIF/MP4 animations implemented.\\
+Reactive-flux diagnostics & \statusdone & State-resolved current, continuity, recrossing, plateau gates, trajectory correlations, and absorber yields implemented.\\
+Energy-resolved transmission & \statusdone & Windowed incident/outgoing spectral flux and validity diagnostics implemented and free-particle tested.\\
+Thermal initial states & \statusdone & Exact canonical mixtures and stochastic thermal-pure estimators implemented with convergence diagnostics.\\
 \bottomrule
 \end{tabular}
 \endgroup
@@ -844,23 +942,13 @@ model-independent experimental proof.
 
 \section{Future development roadmap}
 
-The following extensions are not current capabilities. The first four are the
-preferred starting candidates because they strengthen quantitative rates and
-mechanism tests while preserving the present model architecture.
+Reactive-flux diagnostics, energy-resolved transmission, and exact/stochastic
+thermal initial states were the first three roadmap priorities and are now complete.
+The following extensions remain future capabilities. Automated isotope campaigns
+are the next near-term priority.
 
 \begin{enumerate}
-  \item \textbf{Reactive-flux rate theory (near-term priority).} Evaluate
-        state-resolved probability current at configurable dividing surfaces,
-        flux--side and flux--flux correlations, plateau rates, recrossing, and
-        absorber-resolved outgoing yield. Continuity and integrated-flux tests
-        would replace population-curve fitting as the primary rate estimator.
-  \item \textbf{Energy-resolved transmission (near-term priority).} Fourier
-        transform windowed outgoing flux or wavepacket correlations to obtain
-        transmission probabilities, cumulative reaction probability, resonance
-        energies, and tunneling windows.
-  \item \textbf{Thermal initial states (near-term priority).} Add canonical
-        eigenstate mixtures, stochastic thermal wavepackets, and density-matrix
-        initialization with thermal trace-error and limiting-case tests.
+  \setcounter{enumi}{3}
   \item \textbf{Automated H/D/T campaigns (near-term priority).} Generate
         mass-matched controls and bootstrap kinetic isotope effects while testing
         grid, time-step, duration, ensemble-size, and classical-contamination
@@ -933,7 +1021,10 @@ make test-parallel
 ./qle_1d INPUT.nml
 python analyze_ensemble.py 'run.traj*.rank*.h5' --output ensemble --bootstrap 500
 python ShowDyn.py run.traj000001.rank0.h5 --populations --no-usetex
-python quantum_fdt_density.py --output quantum_density.h5
+python quantum_fdt_density.py --initial-preparation gibbs --output quantum_density.h5
+python quantum_fdt_density.py --initial-preparation thermal-pure \
+  --thermal-samples 4000 --seed 7 --output thermal_pure.h5
+python reactive_flux.py run.traj000001.rank0.h5 --surface 0.0 --output reactive_flux.h5
 python heom_nonmarkovian.py --output heom_nonmarkovian.h5
 python heom_nonmarkovian.py --initial-preparation correlated-projected
 python heom_convergence.py --output heom_convergence
@@ -942,7 +1033,8 @@ python multidimensional_transfer_3d.py --output transfer_3d.h5
 python spin_bath_non_gaussian.py --output spin_bath.h5
 python convergence_campaign.py INPUT.nml --executable ./qle_1d
 python mechanism_attribution.py INPUT.nml --executable ./qle_1d
-python ShowDyn.py run.traj000001.rank0.h5 --wigner --animate --save-animation wigner.mp4
+python ShowDyn.py run.traj000001.rank0.h5 --wigner --animate \
+  --wigner-limit 0.25 --save-animation wigner.mp4
 \end{verbatim}
 \endgroup
 

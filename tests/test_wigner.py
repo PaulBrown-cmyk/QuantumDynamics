@@ -9,7 +9,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ShowDyn import _trapezoid, compute_wigner
+from ShowDyn import TrajData, _fixed_wigner_norm, _trapezoid, compute_wigner
 
 
 def normalized_gaussian(x, center, sigma, wave_number):
@@ -48,4 +48,30 @@ cat /= np.sqrt(_trapezoid(np.abs(cat) ** 2, x))
 _, _, wigner_cat = compute_wigner(x, cat, max_points=None)
 assert np.min(wigner_cat) < -0.05
 
-print("PASS Wigner marginals, resampling, and negativity")
+# Color normalization remains symmetric and independent of animation frame.
+rho_frames = np.vstack((np.abs(psi) ** 2, 0.7 * np.abs(psi) ** 2))
+dummy = TrajData(
+    x=x,
+    t=np.array([0.0, 1.0]),
+    psi=np.vstack((psi, np.sqrt(0.7) * psi)),
+    psi1=None,
+    psi2=None,
+    rho=rho_frames,
+    rho1=None,
+    rho2=None,
+    V=None,
+    V11=None,
+    V22=None,
+    V12=None,
+    V_lower=None,
+    V_upper=None,
+    Vadiab=None,
+    Vdiab=None,
+)
+fixed_norm, fixed_ticks = _fixed_wigner_norm(dummy, "total")
+assert fixed_norm.vmin == -fixed_norm.vmax
+assert np.allclose(fixed_ticks, np.linspace(fixed_norm.vmin, fixed_norm.vmax, 5))
+explicit_norm, _ = _fixed_wigner_norm(dummy, "total", 0.125)
+assert explicit_norm.vmin == -0.125 and explicit_norm.vmax == 0.125
+
+print("PASS Wigner marginals, negativity, and fixed color normalization")

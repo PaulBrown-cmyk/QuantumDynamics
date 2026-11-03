@@ -95,6 +95,7 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
       --output aggregate --skip-fit --no-plot
     "$hdf5_python" "$root/tests/check_ensemble_fit.py"
     "$hdf5_python" "$root/tests/test_wigner.py"
+    "$hdf5_python" "$root/tests/test_reactive_flux.py"
     MPLBACKEND=Agg "$hdf5_python" "$root/ShowDyn.py" smoke_h5.traj000001.rank0.h5 \
       --no-usetex --snapshot 1 --wigner --wigner-points 32 \
       --save-figure wigner-snapshot.png
@@ -108,6 +109,7 @@ if [ "${HDF5_ENABLED:-0}" = 1 ] && [ -n "${QLE_EXE:-}" ] && \
     fi
     if "$hdf5_python" -c 'import scipy' >/dev/null 2>&1; then
       "$hdf5_python" "$root/tests/test_advanced.py"
+      "$hdf5_python" "$root/tests/test_thermal_initial.py"
       "$hdf5_python" "$root/tests/test_heom.py"
       "$hdf5_python" "$root/tests/test_remaining_physics.py"
       "$hdf5_python" "$root/heom_convergence.py" --nx 8 --states 6 \

@@ -74,7 +74,9 @@ remain frame-resolved. `ShowDyn.py` reuses single stored static surface for all 
 wavefunctions. Position is reported in angstrom and momentum as `p/hbar` in inverse
 angstrom. `total` traces over diabatic electronic state; `state1` and `state2` give
 component-resolved diagnostics. Default 256-point analysis grid limits quadratic
-phase-space cost while preserving wavepacket norm.
+phase-space cost while preserving wavepacket norm. Animation color normalization
+is fixed for every frame at the selected-state population divided by pi; use
+`--wigner-limit` to set an explicit symmetric dimensionless range.
 
 ```sh
 # Static density/PES and Wigner figure
@@ -98,6 +100,31 @@ uses Pillow and remains available by choosing a `.gif` filename.
 Negative Wigner values diagnose nonclassical coherence; Wigner function is a
 quasiprobability, not an ordinary probability distribution. Increase
 `--wigner-points` only after checking grid convergence.
+
+## Reactive flux and energy-resolved transmission
+
+`reactive_flux.py` reads saved complex wavefunctions and evaluates state-resolved
+probability current in fs^-1 at a configurable dividing surface. It writes direct
+and flux-integrated side populations, forward/backward crossings, recrossing,
+periodic-boundary current, continuity residuals, absorber-resolved yield when
+absorber controls are supplied, trajectory flux-side/flux-flux correlations, and
+a plateau-rate diagnostic.
+
+```sh
+python reactive_flux.py run.traj000001.rank0.h5 \
+  --mass 1.00784 --surface 0.0 \
+  --incident-surface -0.5 --product-surface 0.5 \
+  --plateau-start 500 --plateau-end 1000 \
+  --output reactive_flux.h5 --plot reactive_flux.png
+```
+
+Energy-resolved output Fourier transforms surface wavefunctions and derivatives,
+then reports incident/product spectral flux and single-channel `T(E)`. Strict
+scattering interpretation requires time-independent closed dynamics, asymptotic
+surfaces, negligible recrossing, resolved time sampling, and a complete passage
+window. `T(E)>1` triggers a warning: damping, driving, finite-window leakage, or
+recrossing has invalidated an S-matrix interpretation. Stored flux correlations
+are multiple-time-origin trajectory estimators, not equilibrium Kubo correlations.
 
 ## Checkpoint/restart
 
@@ -136,7 +163,21 @@ centroid model.
 ```sh
 python quantum_fdt_density.py --temperature 100 --gamma 0.02 \
   --cutoff 0.2 --duration 200 --output quantum_density.h5
+
+# Exact finite-grid canonical density matrix
+python quantum_fdt_density.py --temperature 100 \
+  --initial-preparation gibbs --output quantum_gibbs.h5
+
+# Boltzmann-filtered stochastic thermal pure-state ensemble
+python quantum_fdt_density.py --temperature 100 \
+  --initial-preparation thermal-pure --thermal-samples 4000 --seed 20261103 \
+  --output quantum_thermal_pure.h5
 ```
+
+Thermal output records exact Gibbs populations, initial density matrix, effective
+thermal dimension, stochastic effective sample size, trace-estimator error,
+density Frobenius error, and maximum population error. `gibbs` is exact within the
+retained finite grid; `thermal-pure` converges statistically with sample count.
 
 `heom_nonmarkovian.py` covers strong-coupling, finite-memory physics for a harmonic
 Gaussian Drude-Lorentz bath. It propagates a scaled hierarchy of auxiliary density

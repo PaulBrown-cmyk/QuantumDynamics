@@ -29,6 +29,7 @@ import numpy as np
 import h5py
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 
 
 def _trapezoid(y: np.ndarray, x: np.ndarray, axis: int = -1) -> np.ndarray:
@@ -829,6 +830,23 @@ def _selected_population_bound(d: TrajData, state: str) -> float:
     return max(float(np.max(_trapezoid(rho, d.x, axis=1))), np.finfo(float).eps)
 
 
+def _fixed_wigner_norm(
+    d: TrajData,
+    state: str,
+    requested_limit: Optional[float] = None,
+) -> Tuple[Normalize, np.ndarray]:
+    """Return immutable symmetric Wigner normalization and colorbar ticks."""
+    if requested_limit is not None:
+        if not np.isfinite(requested_limit) or requested_limit <= 0.0:
+            raise ValueError("Wigner color limit must be positive and finite")
+        limit = float(requested_limit)
+    else:
+        # Pure-state bound is population/pi under this Wigner convention.  Using
+        # the maximum selected population fixes one scale for every movie frame.
+        limit = _selected_population_bound(d, state) / np.pi
+    return Normalize(vmin=-limit, vmax=limit, clip=True), np.linspace(-limit, limit, 5)
+
+
 def _save_animation_quicktime(animation, path: str, fps: int, dpi: int) -> None:
     """Save GIF or video, forcing QuickTime-compatible H.264 when appropriate."""
     suffix = path.lower().rsplit(".", 1)[-1] if "." in path else ""
@@ -902,6 +920,7 @@ def plot_phase_space_snapshot(
     state: str = "total",
     max_points: Optional[int] = 256,
     pmax: Optional[float] = None,
+    wigner_limit: Optional[float] = None,
     save: Optional[str] = None,
 ) -> None:
     """Plot density/PES and signed Wigner phase space for one frame."""
@@ -910,7 +929,7 @@ def plot_phase_space_snapshot(
     momentum_mask = _wigner_momentum_mask(k, pmax)
     k_view = k[momentum_mask]
     w_view = wigner[:, momentum_mask]
-    limit = _selected_population_bound(d, state) / np.pi
+    fixed_norm, color_ticks = _fixed_wigner_norm(d, state, wigner_limit)
 
     fig, (ax_density, ax_wigner) = plt.subplots(2, 1, figsize=(9, 8), constrained_layout=True)
     _draw_density_and_pes(ax_density, d, it)
@@ -920,12 +939,11 @@ def plot_phase_space_snapshot(
         aspect="auto",
         extent=(float(xw[0]), float(xw[-1]), float(k_view[0]), float(k_view[-1])),
         cmap="RdBu_r",
-        vmin=-limit,
-        vmax=limit,
+        norm=fixed_norm,
         interpolation="bilinear",
     )
     ax_wigner.set(xlabel=r"$x\;(\AA)$", ylabel=r"$p/\hbar\;(\AA^{-1})$")
-    fig.colorbar(image, ax=ax_wigner, label=r"$W(x,p)$")
+    fig.colorbar(image, ax=ax_wigner, ticks=color_ticks, label=r"$W(x,p/\hbar)$")
     fig.suptitle(f"{state} phase space, t = {d.t[it]:.6g} fs")
     if save:
         fig.savefig(save, dpi=220, bbox_inches="tight")
@@ -940,6 +958,7 @@ def animate_phase_space(
     state: str = "total",
     max_points: Optional[int] = 256,
     pmax: Optional[float] = None,
+    wigner_limit: Optional[float] = None,
     save: Optional[str] = None,
     fps: int = 20,
     dpi: int = 120,
@@ -952,7 +971,7 @@ def animate_phase_space(
     xw, k, wigner = compute_wigner_frame(d, first, state=state, max_points=max_points)
     momentum_mask = _wigner_momentum_mask(k, pmax)
     k_view = k[momentum_mask]
-    limit = _selected_population_bound(d, state) / np.pi
+    fixed_norm, color_ticks = _fixed_wigner_norm(d, state, wigner_limit)
 
     fig, (ax_density, ax_wigner) = plt.subplots(2, 1, figsize=(9, 8), constrained_layout=True)
     density_lines, potential_lines = _draw_density_and_pes(ax_density, d, first)
@@ -962,13 +981,17 @@ def animate_phase_space(
         aspect="auto",
         extent=(float(xw[0]), float(xw[-1]), float(k_view[0]), float(k_view[-1])),
         cmap="RdBu_r",
-        vmin=-limit,
-        vmax=limit,
+        norm=fixed_norm,
         interpolation="bilinear",
         animated=True,
     )
     ax_wigner.set(xlabel=r"$x\;(\AA)$", ylabel=r"$p/\hbar\;(\AA^{-1})$")
-    fig.colorbar(phase_image, ax=ax_wigner, label=r"$W(x,p)$")
+    fig.colorbar(
+        phase_image,
+        ax=ax_wigner,
+        ticks=color_ticks,
+        label=r"$W(x,p/\hbar)$",
+    )
     title = fig.suptitle("")
 
     def update(frame_number):
@@ -981,6 +1004,8 @@ def animate_phase_space(
                 line.set_ydata(np.ravel(current)[: line.get_xdata().size])
         _, _, current_wigner = compute_wigner_frame(d, it, state=state, max_points=max_points)
         phase_image.set_data(current_wigner[:, momentum_mask].T)
+        # Prevent Matplotlib from autoscaling color normalization between frames.
+        phase_image.set_clim(fixed_norm.vmin, fixed_norm.vmax)
         title.set_text(f"{state} phase space, t = {d.t[it]:.6g} fs")
         return tuple([line for line, _ in density_lines] +
                      [line for line, _ in potential_lines] + [phase_image, title])
@@ -1302,6 +1327,8 @@ def main():
                     help="Maximum uniform x-grid points used by Wigner transform")
     ap.add_argument("--pmax", type=float, default=None,
                     help="Display limit for abs(p/hbar) in inverse angstrom")
+    ap.add_argument("--wigner-limit", type=float, default=None,
+                    help="Fixed symmetric Wigner color limit; default is population/pi")
 
     # Populations vs time
     ap.add_argument("--populations", action="store_true", help="Plot reactant/product probabilities vs time (static)")
@@ -1318,6 +1345,8 @@ def main():
         ap.error("--dpi must be positive")
     if args.wigner_points < 4:
         ap.error("--wigner-points must be at least four")
+    if args.wigner_limit is not None and args.wigner_limit <= 0.0:
+        ap.error("--wigner-limit must be positive")
     if args.snapshot is not None and (args.animate or args.save_animation):
         ap.error("--snapshot cannot be combined with --animate/--save-animation")
     if args.save_figure and (args.animate or args.save_animation):
@@ -1367,6 +1396,7 @@ def main():
                 state=args.wigner_state,
                 max_points=args.wigner_points,
                 pmax=args.pmax,
+                wigner_limit=args.wigner_limit,
                 save=args.save_animation,
                 fps=args.fps,
                 dpi=args.dpi,
@@ -1379,6 +1409,7 @@ def main():
                 state=args.wigner_state,
                 max_points=args.wigner_points,
                 pmax=args.pmax,
+                wigner_limit=args.wigner_limit,
                 save=args.save_figure,
             )
     elif args.snapshot is not None:
